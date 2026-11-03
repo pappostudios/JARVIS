@@ -377,6 +377,12 @@ async def google_credentials(file: UploadFile = File(...)):
     return {"ok": True}
 
 
+@app.post("/api/google/cancel")
+def google_cancel():
+    g.cancel_auth()
+    return {"ok": True}
+
+
 @app.post("/api/google/disconnect")
 def google_disconnect():
     g.disconnect()

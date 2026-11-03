@@ -9,6 +9,7 @@ import base64
 import html
 import re
 import threading
+import time
 import uuid
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
@@ -28,7 +29,7 @@ class GoogleNotConnected(RuntimeError):
 
 
 # ── auth ──────────────────────────────────────────────────────
-_auth_state: dict[str, Any] = {"running": False, "error": None}
+_auth_state: dict[str, Any] = {"running": False, "error": None, "url": None, "attempt": 0}
 _creds_lock = threading.Lock()
 
 
@@ -62,65 +63,129 @@ def _svc(name: str, version: str):
 def google_status() -> dict:
     connected = False
     email = None
+    token_error = None
     if config.GOOGLE_TOKEN.exists():
         try:
             email = _svc("gmail", "v1").users().getProfile(userId="me").execute().get("emailAddress")
             connected = True
         except Exception as e:  # noqa: BLE001
-            _auth_state["error"] = str(e)
+            token_error = str(e)
     return {
         "connected": connected,
         "email": email,
         "client_secret_present": config.GOOGLE_CLIENT_SECRET.exists(),
         "auth_running": _auth_state["running"],
-        "error": _auth_state["error"],
+        "auth_url": _auth_state["url"] if _auth_state["running"] else None,
+        "error": _auth_state["error"] or token_error,
     }
 
 
-def run_auth_flow(open_browser: bool = True) -> None:
-    """Blocking OAuth flow: opens a browser on THIS computer for Google sign-in."""
+_SUCCESS_PAGE = """<!doctype html><meta charset=utf-8><title>JARVIS</title>
+<body style="background:#03070d;color:#dcefff;font:16px system-ui;display:grid;place-items:center;height:100vh;margin:0">
+<div style="text-align:center"><h2 style="color:#46d9ff;letter-spacing:.2em">J.A.R.V.I.S.</h2>
+<p>%s</p><p style="color:#7f97ad">You can close this tab and return to JARVIS.</p></div>"""
+
+
+def _friendly_oauth_error(code: str) -> str:
+    if code == "access_denied":
+        return ("Google refused the sign-in (access_denied). Either you pressed Cancel, or your Gmail address is "
+                "not on the Test users list. Fix: Google Cloud → Google Auth Platform → Audience → Test users → "
+                "Add users → your Gmail → Save. Then press 'Sign in with Google' again.")
+    return f"Google returned an error: {code}. Press 'Sign in with Google' to try again."
+
+
+def run_auth_flow(open_browser: bool = True, attempt: int | None = None) -> None:
+    """OAuth sign-in on THIS computer: opens Google in the browser, waits for the redirect back.
+    A newer attempt (pressing the button again) silently supersedes this one."""
+    import http.server
+    import os
+    import webbrowser
+    from urllib.parse import parse_qs, urlparse
+
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     if not config.GOOGLE_CLIENT_SECRET.exists():
-        raise FileNotFoundError(
-            f"Missing {config.GOOGLE_CLIENT_SECRET}. Download your OAuth 'Desktop app' client JSON from "
-            "Google Cloud Console and save it there (see README)."
-        )
-    flow = InstalledAppFlow.from_client_secrets_file(str(config.GOOGLE_CLIENT_SECRET), SCOPES)
+        raise FileNotFoundError("Upload your Google credentials file first (Settings → Google account).")
+    os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+    result: dict[str, str] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        timeout = 5  # don't let an idle browser pre-connection block the wait loop
+
+        def do_GET(self):  # noqa: N802
+            qs = parse_qs(urlparse(self.path).query)
+            if "code" in qs or "error" in qs:
+                result["path"] = self.path
+                ok = "code" in qs
+                msg = "Google account connected." if ok else _friendly_oauth_error(qs["error"][0])
+                body = (_SUCCESS_PAGE % msg).encode()
+                self.send_response(200)
+            else:
+                body, _ = b"", self.send_response(404)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # keep the log quiet
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    server.timeout = 1
     try:
-        creds = flow.run_local_server(
-            port=0, open_browser=open_browser, prompt="consent", timeout_seconds=300,
-            authorization_prompt_message="Opening Google sign-in: {url}",
-            success_message="JARVIS is now connected to your Google account. You can close this tab.",
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(config.GOOGLE_CLIENT_SECRET), SCOPES, redirect_uri=f"http://127.0.0.1:{server.server_address[1]}/"
         )
-    except AttributeError as e:  # library raises this when the 5-minute wait expires
-        raise TimeoutError("Google sign-in timed out. Press 'Sign in with Google' to try again.") from e
-    except Exception as e:  # noqa: BLE001
-        msg = str(e)
-        if "access_denied" in msg:
-            raise PermissionError(
-                "Google blocked the sign-in (access_denied). In Google Cloud → OAuth consent screen → "
-                "Audience/Test users, add your Gmail address, then try again.") from e
-        raise
-    config.GOOGLE_TOKEN.write_text(creds.to_json())
+        url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+        if attempt is not None:
+            _auth_state["url"] = url
+        print("Google sign-in URL:", url)
+        if open_browser:
+            webbrowser.open(url)
+        deadline = time.time() + 15 * 60
+        while "path" not in result:
+            if attempt is not None and attempt != _auth_state["attempt"]:
+                return  # superseded by a new attempt or cancelled
+            if time.time() > deadline:
+                raise TimeoutError("Google sign-in timed out. Press 'Sign in with Google' to try again.")
+            server.handle_request()
+    finally:
+        server.server_close()
+
+    qs = parse_qs(urlparse(result["path"]).query)
+    if "error" in qs:
+        raise PermissionError(_friendly_oauth_error(qs["error"][0]))
+    flow.fetch_token(code=qs["code"][0])
+    granted = set(str(flow.oauth2session.token.get("scope", "")).split())
+    missing = [s_ for s_ in SCOPES if granted and s_ not in granted]
+    if missing:
+        raise PermissionError("Google sign-in worked, but not every permission box was ticked. Press 'Sign in with "
+                              "Google' again and tick ALL the boxes (Calendar and Gmail) so JARVIS can help you.")
+    config.GOOGLE_TOKEN.write_text(flow.credentials.to_json())
 
 
 def start_auth_in_background() -> dict:
-    if _auth_state["running"]:
-        return {"started": False, "message": "Sign-in already in progress."}
-
-    _auth_state.update(running=True, error=None)  # set before the thread starts so status polls see it
+    """Start (or restart) Google sign-in. Pressing the button again always works."""
+    _auth_state["attempt"] += 1
+    attempt = _auth_state["attempt"]
+    _auth_state.update(running=True, error=None, url=None)  # set before the thread starts so status polls see it
 
     def _run():
         try:
-            run_auth_flow()
+            run_auth_flow(attempt=attempt)
         except Exception as e:  # noqa: BLE001
-            _auth_state["error"] = str(e)
+            if attempt == _auth_state["attempt"]:
+                _auth_state["error"] = str(e)
         finally:
-            _auth_state["running"] = False
+            if attempt == _auth_state["attempt"]:
+                _auth_state.update(running=False, url=None)
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run, daemon=True, name="google-signin").start()
     return {"started": True, "message": "Opening Google sign-in in your web browser…"}
+
+
+def cancel_auth() -> None:
+    _auth_state["attempt"] += 1
+    _auth_state.update(running=False, url=None, error=None)
 
 
 def disconnect() -> None:
@@ -641,5 +706,5 @@ def unread_count() -> int:
 
 if __name__ == "__main__":
     print("Opening Google sign-in in your browser…")
-    run_auth_flow()
+    run_auth_flow(attempt=None)
     print("✓ Google connected. Token saved to", config.GOOGLE_TOKEN)

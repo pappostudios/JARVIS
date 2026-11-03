@@ -774,8 +774,14 @@ async function loadGoogleStatus() {
     ? "A Google sign-in page has opened in your web browser. Choose your account, press <strong>Continue</strong> on the “unverified app” notice, tick all boxes and allow."
     : "A Google sign-in page has opened <strong>on your computer's browser</strong> — finish signing in there.";
   else if (!st.client_secret_present) el.innerHTML = "One-time setup: Google needs you to create a private key for JARVIS (about 10 minutes). Follow the steps below.";
-  else el.innerHTML = "Ready. Press <strong>Sign in with Google</strong>." + (st.error ? `<br><span class="err">${esc(st.error)}</span>` : "");
-  $("#googleConnect").classList.toggle("hidden", st.connected || !st.client_secret_present || st.auth_running);
+  else el.innerHTML = st.error ? `<span class="err">${esc(st.error)}</span>` : "Ready. Press <strong>Sign in with Google</strong>.";
+  // the sign-in button is ALWAYS available (as "Try again" while a sign-in is pending)
+  $("#googleConnect").classList.toggle("hidden", st.connected || !st.client_secret_present);
+  $("#googleConnect").textContent = st.auth_running || st.error ? "Try again" : "Sign in with Google";
+  $("#googleReopen").classList.toggle("hidden", !(st.auth_running && st.auth_url));
+  $("#googleReopen").dataset.url = st.auth_url || "";
+  $("#googleCancel").classList.toggle("hidden", !st.auth_running);
+  $("#googleHelp").classList.toggle("hidden", st.connected || !st.client_secret_present || !(st.auth_running || st.error));
   $("#googleDisconnect").classList.toggle("hidden", !st.connected);
   clearTimeout(googlePoll);
   if (st.auth_running) googlePoll = setTimeout(async () => {
@@ -785,6 +791,11 @@ async function loadGoogleStatus() {
 }
 $("#googleConnect").addEventListener("click", guard(async () => {
   const r = await postJSON("/api/google/connect"); toast(r.message); await loadGoogleStatus();
+}));
+$("#googleCancel").addEventListener("click", guard(async () => { await postJSON("/api/google/cancel"); await loadGoogleStatus(); }));
+$("#googleReopen").addEventListener("click", guard(async () => {
+  const url = $("#googleReopen").dataset.url; if (!url) return;
+  if (isDesktop) await postJSON("/api/open-url", { url }); else window.open(url, "_blank");
 }));
 $("#googleDisconnect").addEventListener("click", guard(async () => {
   if (!confirm("Disconnect your Google account from JARVIS?")) return;

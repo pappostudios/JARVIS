@@ -155,8 +155,17 @@
               <label class="btn primary file-btn">Upload credentials file<input type="file" id="credFile" accept=".json,application/json" hidden></label>
             </li>
           </ol>
+          <div id="googleHelp" class="google-help hidden">
+            <strong>What you'll see on Google's page:</strong>
+            <ul>
+              <li><em>“Google hasn't verified this app”</em> — normal for your private JARVIS. Click <strong>Advanced</strong> (or <strong>Continue</strong>) → <strong>Go to JARVIS (unsafe)</strong>, then tick <strong>all</strong> the boxes and press Continue.</li>
+              <li><em>“Access blocked: JARVIS has not completed the Google verification process”</em> or <em>Error 403: access_denied</em> — your Gmail isn't a test user yet. Open <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/audience">Audience</a> → <em>Test users</em> → <em>Add users</em> → your Gmail → Save, then press <strong>Try again</strong> below.</li>
+            </ul>
+          </div>
           <div class="row">
             <button class="btn primary" id="googleConnect">Sign in with Google</button>
+            <button class="btn hidden" id="googleReopen">Open sign-in page again</button>
+            <button class="btn hidden" id="googleCancel">Cancel</button>
             <button class="btn" id="googleDisconnect">Disconnect</button>
             <label class="btn file-btn hidden" id="googleReupload">Replace credentials file<input type="file" id="credFile2" accept=".json,application/json" hidden></label>
           </div>

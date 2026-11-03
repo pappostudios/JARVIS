@@ -249,6 +249,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .update-box { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
 .update-box ul { margin: 6px 0 0; padding-left: 18px; color: var(--text); font-size: 13px; }
 
+.google-help { border: 1px solid rgba(255, 181, 71, .35); background: rgba(255, 181, 71, .06); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.55; }
+.google-help ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.google-help em { font-style: normal; color: var(--amber); }
+.google-help a { color: var(--cyan); }
+
 /* toasts */
 .toasts { position: fixed; z-index: 60; top: 76px; right: 20px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
 .toast { pointer-events: auto; background: var(--panel-solid); border: 1px solid var(--line-2); border-left: 3px solid var(--cyan); padding: 10px 14px; border-radius: 10px; max-width: 340px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); animation: rise .25s; font-size: 13px; }
