@@ -87,8 +87,21 @@ def run_auth_flow(open_browser: bool = True) -> None:
             "Google Cloud Console and save it there (see README)."
         )
     flow = InstalledAppFlow.from_client_secrets_file(str(config.GOOGLE_CLIENT_SECRET), SCOPES)
-    creds = flow.run_local_server(port=0, open_browser=open_browser, prompt="consent",
-                                  authorization_prompt_message="Opening Google sign-in: {url}")
+    try:
+        creds = flow.run_local_server(
+            port=0, open_browser=open_browser, prompt="consent", timeout_seconds=300,
+            authorization_prompt_message="Opening Google sign-in: {url}",
+            success_message="JARVIS is now connected to your Google account. You can close this tab.",
+        )
+    except AttributeError as e:  # library raises this when the 5-minute wait expires
+        raise TimeoutError("Google sign-in timed out. Press 'Sign in with Google' to try again.") from e
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)
+        if "access_denied" in msg:
+            raise PermissionError(
+                "Google blocked the sign-in (access_denied). In Google Cloud → OAuth consent screen → "
+                "Audience/Test users, add your Gmail address, then try again.") from e
+        raise
     config.GOOGLE_TOKEN.write_text(creds.to_json())
 
 
@@ -96,8 +109,9 @@ def start_auth_in_background() -> dict:
     if _auth_state["running"]:
         return {"started": False, "message": "Sign-in already in progress."}
 
+    _auth_state.update(running=True, error=None)  # set before the thread starts so status polls see it
+
     def _run():
-        _auth_state.update(running=True, error=None)
         try:
             run_auth_flow()
         except Exception as e:  # noqa: BLE001
@@ -106,7 +120,7 @@ def start_auth_in_background() -> dict:
             _auth_state["running"] = False
 
     threading.Thread(target=_run, daemon=True).start()
-    return {"started": True, "message": "A Google sign-in window has opened on the desktop computer."}
+    return {"started": True, "message": "Opening Google sign-in in your web browser…"}
 
 
 def disconnect() -> None:

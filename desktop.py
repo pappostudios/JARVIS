@@ -1,14 +1,18 @@
-"""JARVIS desktop app: starts the server and opens the dashboard in its own app window.
+"""JARVIS desktop app: starts the server in the background and opens the dashboard in its own app window.
 
-Uses Edge/Chrome "app mode" (a clean, frameless window with full microphone support).
-Falls back to pywebview if installed, else your default browser.
-The server keeps running while this console is open, so your phone stays connected.
+- Launched via JARVIS.bat / the desktop icon it runs WITHOUT a console window (pythonw), so it can't be closed
+  by accident. Closing the dashboard window does NOT stop JARVIS (your phone stays connected).
+  To stop him: Settings -> "Shut down JARVIS".
+- Clicking the icon while JARVIS is already running just reopens the window.
+- Everything is logged to data/jarvis.log.
 """
 from __future__ import annotations
 
+import json
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -19,26 +23,44 @@ from pathlib import Path
 
 os.chdir(Path(__file__).resolve().parent)
 
-from jarvis import config  # noqa: E402
-from run_jarvis import banner, serve  # noqa: E402
+from jarvis import config, logsetup  # noqa: E402
+
+logsetup.setup()
+
+import run_jarvis  # noqa: E402
+
+URL = run_jarvis.local_url()
+_ctx = ssl._create_unverified_context()  # local self-signed certs are fine here
 
 
-def url() -> str:
-    scheme = "https" if config.SSL_CERTFILE else "http"
-    return f"{scheme}://localhost:{config.PORT}/"
+def alert(message: str, title: str = "J.A.R.V.I.S.") -> None:
+    """Show a message even when there is no console window."""
+    print(f"\n  {message}\n")
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(0, message, title, 0x40)
+        except Exception:  # noqa: BLE001
+            pass
 
 
-def wait_for_server(timeout: float = 30) -> bool:
-    import ssl
+def health() -> dict | None:
+    try:
+        with urllib.request.urlopen(URL + "api/health", timeout=1.5, context=_ctx) as r:
+            return json.loads(r.read().decode())
+    except Exception:  # noqa: BLE001
+        return None
 
-    ctx = ssl._create_unverified_context()  # local self-signed certs are fine here
+
+def wait_for_server(thread: threading.Thread, timeout: float = 40) -> bool:
     end = time.time() + timeout
     while time.time() < end:
-        try:
-            urllib.request.urlopen(url() + "api/health", timeout=1, context=ctx)
+        if health():
             return True
-        except Exception:  # noqa: BLE001
-            time.sleep(0.3)
+        if not thread.is_alive():
+            return False
+        time.sleep(0.3)
     return False
 
 
@@ -70,40 +92,58 @@ def find_chromium() -> str | None:
 
 
 def open_window() -> None:
-    target = url()
     browser = find_chromium()
     if browser:
         profile = config.DATA_DIR / "app-window-profile"
+        flags = 0x08000000 if platform.system() == "Windows" else 0  # CREATE_NO_WINDOW
         subprocess.Popen([
-            browser, f"--app={target}", f"--user-data-dir={profile}", "--window-size=1440,920",
+            browser, f"--app={URL}", f"--user-data-dir={profile}", "--window-size=1440,920",
             "--no-first-run", "--no-default-browser-check", "--autoplay-policy=no-user-gesture-required",
-        ])
+        ], creationflags=flags)
         return
-    try:
-        import webview  # type: ignore  # optional: pip install pywebview
-
-        webview.create_window("J.A.R.V.I.S.", target, width=1440, height=920, background_color="#03070d")
-        webview.start()  # blocks until window closes
-        return
-    except ImportError:
-        pass
-    webbrowser.open(target)
+    webbrowser.open(URL)
 
 
 def main() -> None:
-    banner()
-    threading.Thread(target=serve, daemon=True).start()
-    if not wait_for_server():
-        print("  ✗ Server did not start. Is another program using port", config.PORT, "?")
+    run_jarvis.banner()
+
+    # Already running? Just show the window.
+    h = health()
+    if h and h.get("app") == "jarvis":
+        print("  JARVIS is already running - opening the window.")
+        open_window()
+        return
+    if run_jarvis.port_in_use():
+        alert(f"Port {config.PORT} is being used by another program.\n\n"
+              f"Change PORT in the .env file (e.g. PORT=8777) and start JARVIS again.")
         sys.exit(1)
+
+    server_thread = threading.Thread(target=run_jarvis.serve, name="jarvis-server", daemon=True)
+    server_thread.start()
+    if not wait_for_server(server_thread):
+        alert("JARVIS could not start.\n\nLast lines of data\\jarvis.log:\n\n" + logsetup.tail(15)[-1500:])
+        sys.exit(1)
+
     open_window()
-    print("  JARVIS is online. Close this window (or press Ctrl+C) to shut him down.\n")
+    print("  JARVIS is online. Shut him down from Settings -> 'Shut down JARVIS' (or press Ctrl+C here).\n")
     try:
-        while True:
-            time.sleep(3600)
+        while server_thread.is_alive():
+            server_thread.join(1.0)
     except KeyboardInterrupt:
+        run_jarvis.request_shutdown()
+        server_thread.join(5)
         print("  Goodbye, sir.")
+        return
+    if not getattr(run_jarvis._server, "should_exit", False):
+        alert("JARVIS stopped unexpectedly.\n\nDetails are in data\\jarvis.log:\n\n" + logsetup.tail(15)[-1500:])
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:  # noqa: BLE001
+        import traceback
+
+        traceback.print_exc()
+        alert(f"JARVIS hit an error while starting:\n\n{type(e).__name__}: {e}\n\nSee data\\jarvis.log")
+        sys.exit(1)

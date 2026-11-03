@@ -57,20 +57,17 @@ projects and to-do list, and helps you plan your day. You can talk to him or typ
 
 ## 3. Connect Google Calendar & Gmail (10 min, once)
 
-JARVIS talks to Google with **your own** private OAuth app, so your data never goes through anyone else's server.
+JARVIS talks to Google with **your own** private Google key, so your data never goes through anyone else's server.
+Google requires you to create that key yourself — JARVIS walks you through it:
 
-1. Open **https://console.cloud.google.com/** → project picker → **New project** → name it `JARVIS` → Create.
-2. **APIs & Services → Library**: search and **Enable** both **Google Calendar API** and **Gmail API**.
-3. **APIs & Services → OAuth consent screen** (or *Google Auth Platform → Branding*):
-   user type **External**, app name `JARVIS`, your email for support/developer contact → Save.
-   Under **Audience / Test users**, **add your own Gmail address**.
-4. **APIs & Services → Credentials → Create credentials → OAuth client ID** → Application type **Desktop app**
-   → Create → **Download JSON**.
-5. Rename the downloaded file to **`credentials.json`** and put it in the **`data`** folder inside JARVIS.
-6. Start JARVIS, open **Settings (⚙) → Connect Google**. A Google sign-in page opens on your computer.
-   You'll see *“Google hasn't verified this app”* — that's expected for your private app: click
-   **Continue**, tick all permissions, done.
-   (Alternative: run `.venv\Scripts\python -m jarvis.google_services` from the JARVIS folder.)
+1. Start JARVIS and open **Settings (⚙) → Google account**. You'll see a 6-step guide with direct links
+   (on the desktop they open in your normal browser, where you're signed in to Google).
+2. Follow the steps: create a project → enable the Calendar and Gmail APIs → set up the consent screen →
+   **add your own Gmail as a test user** → create an OAuth client of type **Desktop app** → **Download JSON**.
+3. Press **Upload credentials file** and pick the JSON you downloaded.
+4. Press **Sign in with Google**. A Google page opens in your browser. You'll see *“Google hasn't verified this
+   app”* — expected for your private app: click **Continue**, tick all permissions, allow. The dashboard turns
+   green within a few seconds.
 
 > While the app is in “Testing” mode Google expires the sign-in after 7 days. To avoid re-connecting weekly,
 > go to the OAuth consent screen / Audience page and click **Publish app** (no review is needed for personal use
@@ -78,11 +75,19 @@ JARVIS talks to Google with **your own** private OAuth app, so your data never g
 
 ## 4. Start him
 
-Double-click the **JARVIS** desktop icon. A console starts the server (minimised) and the dashboard opens in its
-own app window. Enter your access code once. Click the microphone (or **hold Space**) and talk.
+Double-click the **JARVIS** desktop icon. JARVIS starts quietly in the background (no console window) and the
+dashboard opens in its own app window. Enter your access code once. Click the microphone (or **hold Space**) and talk.
 
-Keep JARVIS running while you want phone access — closing the app window doesn't stop the server; closing the
-console does. To start JARVIS with Windows: press `Win+R`, type `shell:startup`, and copy the desktop shortcut there.
+- Closing the dashboard window does **not** stop JARVIS, so your phone stays connected. Click the icon again to
+  reopen the window.
+- To stop him: **Settings → Shut down JARVIS**.
+- To start JARVIS with Windows: press `Win+R`, type `shell:startup`, and copy the desktop shortcut there.
+- If anything misbehaves: **Settings → Diagnostics** shows the log (also saved in `data\jarvis.log`), or run
+  **`JARVIS-debug.bat`** to start him with a visible console.
+
+### Updating to a new version
+Download the new ZIP and extract it **over** your JARVIS folder, replacing files. Your `.env`, `data` folder
+(projects, memory, Google sign-in) and installed packages are kept. If `requirements.txt` changed, run `install.bat` again.
 
 ## 5. Connect your Android phone
 
@@ -145,8 +150,10 @@ you, and voice live in the dashboard's **Settings** panel.
 
 | Problem | Fix |
 |---|---|
-| “GEMINI_API_KEY missing” | Put the key in `.env`, restart JARVIS. |
-| “Google account is not connected” | Do step 3; check `data/credentials.json` exists. |
+| Red bar “JARVIS server is not running” | Start JARVIS from the desktop icon; the page reconnects by itself. If it keeps stopping, open `data\jarvis.log` (or run `JARVIS-debug.bat`) and look at the last lines. |
+| “GEMINI_API_KEY missing” | Put the key in `.env`, then Settings → Shut down JARVIS and start him again. |
+| “Google account is not connected” | Do step 3 (Settings → Google account). |
+| Upload says “Web application client” | You created the wrong client type — create a new one of type **Desktop app**. |
 | `access_denied` / “app not verified” blocks sign-in | Add your Gmail as a **Test user** on the OAuth consent screen. |
 | Microphone button does nothing on the phone | You're on plain `http://` — use Tailscale's `https://` address. |
 | No sound on phone | Tap the screen once (browsers block audio until you interact), check media volume. |

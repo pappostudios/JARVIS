@@ -52,6 +52,10 @@
     </div>
   </header>
 
+  <div id="offlineBar" class="offline-bar hidden" role="alert">
+    <strong>JARVIS server is not running.</strong> Start him from the JARVIS icon on your computer — this page reconnects automatically.
+  </div>
+
   <main class="layout">
     <!-- ── Left: today ──────────────────── -->
     <section class="col col-left" data-tab="today">
@@ -141,9 +145,20 @@
         <section>
           <h3>Google account</h3>
           <p id="googleStatus" class="muted">Checking…</p>
+          <ol id="googleSetup" class="setup-steps hidden">
+            <li><a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/projectcreate">Create a Google Cloud project</a> — name it <em>JARVIS</em>, press Create. (Sign in with the Google account whose Gmail and Calendar JARVIS should use.)</li>
+            <li>Enable the <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com">Google Calendar API</a> and the <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/apis/library/gmail.googleapis.com">Gmail API</a> — press <em>Enable</em> on each (make sure the JARVIS project is selected at the top).</li>
+            <li>Open <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/overview">Google Auth Platform</a> → <em>Get started</em>: app name <em>JARVIS</em>, your email, audience <em>External</em>, finish.</li>
+            <li>In <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/audience">Audience</a> → <em>Test users</em> → <em>Add users</em> → add your own Gmail address → Save.</li>
+            <li>In <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/clients/create">Clients → Create client</a>: type <strong>Desktop app</strong>, name <em>JARVIS</em>, Create → <strong>Download JSON</strong>.</li>
+            <li>Upload that downloaded file here:
+              <label class="btn primary file-btn">Upload credentials file<input type="file" id="credFile" accept=".json,application/json" hidden></label>
+            </li>
+          </ol>
           <div class="row">
-            <button class="btn primary" id="googleConnect">Connect Google</button>
+            <button class="btn primary" id="googleConnect">Sign in with Google</button>
             <button class="btn" id="googleDisconnect">Disconnect</button>
+            <label class="btn file-btn hidden" id="googleReupload">Replace credentials file<input type="file" id="credFile2" accept=".json,application/json" hidden></label>
           </div>
         </section>
         <section>
@@ -184,6 +199,8 @@
           <div class="row">
             <button class="btn" id="resetChat">Clear conversation</button>
             <button class="btn" id="notifBtn">Enable notifications</button>
+            <button class="btn" id="logsBtn">Diagnostics</button>
+            <button class="btn danger" id="shutdownBtn">Shut down JARVIS</button>
           </div>
         </section>
         <button class="btn primary wide" id="saveSettings">Save settings</button>

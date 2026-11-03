@@ -13,10 +13,11 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, db, google_services as g, projects, voice
+from . import config, db, google_services as g, logsetup, projects, voice
 from .agent import jarvis
 from .tools import execute_pending
 
+logsetup.setup()
 app = FastAPI(title="J.A.R.V.I.S.", docs_url=None, redoc_url=None)
 
 # ── auth ──────────────────────────────────────────────────────
@@ -79,7 +80,41 @@ def session(request: Request):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "gemini_key": bool(config.GEMINI_API_KEY), "model": jarvis.model}
+    return {"ok": True, "app": "jarvis", "gemini_key": bool(config.GEMINI_API_KEY), "model": jarvis.model}
+
+
+@app.post("/api/shutdown")
+def shutdown():
+    import threading
+
+    import run_jarvis
+
+    threading.Timer(0.5, run_jarvis.request_shutdown).start()
+    return {"ok": True}
+
+
+class OpenURLBody(BaseModel):
+    url: str
+
+
+@app.post("/api/open-url")
+def open_url(body: OpenURLBody, request: Request):
+    """Open a setup link in the desktop's normal browser (where the user is signed in to Google)."""
+    import webbrowser
+    from urllib.parse import urlparse
+
+    host = request.client.host if request.client else ""
+    u = urlparse(body.url)
+    if host not in ("127.0.0.1", "::1", "localhost") or u.scheme != "https" or not (
+        u.hostname or "").endswith(("google.com", "tailscale.com")):
+        raise HTTPException(400, "Not allowed")
+    webbrowser.open(body.url)
+    return {"ok": True}
+
+
+@app.get("/api/logs")
+def logs():
+    return {"log": logsetup.tail(200), "path": str(logsetup.LOG_FILE)}
 
 
 # ── chat ──────────────────────────────────────────────────────
@@ -280,7 +315,27 @@ def google_status():
 @app.post("/api/google/connect")
 def google_connect():
     _overview_cache["t"] = 0
+    if not config.GOOGLE_CLIENT_SECRET.exists():
+        raise HTTPException(400, "Upload your Google credentials.json first (Settings → Google account).")
     return g.start_auth_in_background()
+
+
+@app.post("/api/google/credentials")
+async def google_credentials(file: UploadFile = File(...)):
+    raw = await file.read()
+    try:
+        data = json.loads(raw.decode("utf-8-sig"))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, "That file isn't valid JSON. Download the OAuth client JSON from Google Cloud again.") from e
+    if "web" in data and "installed" not in data:
+        raise HTTPException(400, "This is a 'Web application' client. In Google Cloud create an OAuth client of type "
+                                 "'Desktop app' instead, and download that JSON.")
+    inst = data.get("installed") or {}
+    if not inst.get("client_id") or not inst.get("client_secret"):
+        raise HTTPException(400, "This doesn't look like an OAuth client file. In Google Cloud → Credentials → "
+                                 "OAuth 2.0 Client IDs, click the download icon next to your 'Desktop' client.")
+    config.GOOGLE_CLIENT_SECRET.write_text(json.dumps(data))
+    return {"ok": True}
 
 
 @app.post("/api/google/disconnect")

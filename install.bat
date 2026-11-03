@@ -12,8 +12,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\create_shortcut.ps1
 echo.
 echo  Setup complete.
 echo  1) Open .env in Notepad and paste your GEMINI_API_KEY and an access code.
-echo  2) Put your Google OAuth file at data\credentials.json (see README).
-echo  3) Double-click the JARVIS icon on your desktop.
+echo  2) Double-click the JARVIS icon on your desktop.
+echo  3) In JARVIS open Settings - Google account and follow the steps.
 echo.
 notepad .env
 pause

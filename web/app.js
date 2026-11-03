@@ -18,7 +18,10 @@ async function api(path, opts = {}) {
     init.headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(opts.json);
   }
-  const r = await fetch(path, init);
+  let r;
+  try { r = await fetch(path, init); }
+  catch { goOffline(); throw new Error("Can't reach the JARVIS server. Make sure JARVIS is running on your computer."); }
+  if (state.offline) goOnline();
   if (r.status === 401) { showLogin(); throw new Error("Not authenticated"); }
   if (!r.ok) {
     let msg = r.statusText;
@@ -29,6 +32,31 @@ async function api(path, opts = {}) {
 }
 const getJSON = async (p) => (await api(p)).json();
 const postJSON = async (p, body = {}) => (await api(p, { json: body })).json();
+
+/* ───────────────────────── connection watchdog ───────────────────────── */
+let offlineTimer = null;
+function goOffline() {
+  if (state.offline) return;
+  state.offline = true;
+  $("#offlineBar").classList.remove("hidden");
+  $("#sysPill").classList.remove("ok"); $("#sysPill").classList.add("bad"); $("#sysText").textContent = "Offline";
+  core.set("idle", "Server offline");
+  clearInterval(offlineTimer);
+  offlineTimer = setInterval(async () => {
+    try { const r = await fetch("/api/health", { cache: "no-store" }); if (r.ok) goOnline(); } catch {}
+  }, 4000);
+}
+function goOnline() {
+  if (!state.offline) return;
+  state.offline = false;
+  clearInterval(offlineTimer);
+  $("#offlineBar").classList.add("hidden");
+  core.set("idle");
+  toast("Reconnected to JARVIS.");
+  boot();
+}
+/* run an async UI action and report failures as a toast instead of failing silently */
+const guard = (fn) => async (...args) => { try { await fn(...args); } catch (e) { if (e.message !== "Not authenticated") toast(e.message, "bad"); } };
 
 /* ───────────────────────── helpers ───────────────────────── */
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -69,7 +97,9 @@ $("#loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("#loginErr").textContent = "";
   try {
-    const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: $("#loginCode").value }) });
+    let r;
+    try { r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: $("#loginCode").value }) }); }
+    catch { throw new Error("Can't reach the JARVIS server. Is JARVIS running on your computer?"); }
     if (!r.ok) throw new Error((await r.json()).detail || "Denied");
     $("#login").classList.add("hidden");
     boot();
@@ -592,7 +622,7 @@ let refreshing = false;
 async function refresh(force = false) {
   if (refreshing) return; refreshing = true;
   try { renderOverview(await getJSON(`/api/overview${force ? "?refresh=1" : ""}`)); }
-  catch (e) { if (e.message !== "Not authenticated") { $("#sysPill").classList.add("bad"); $("#sysText").textContent = "Offline"; } }
+  catch (e) { if (e.message !== "Not authenticated" && !state.offline) { $("#sysPill").classList.add("bad"); $("#sysText").textContent = "Error"; console.warn(e); } }
   finally { refreshing = false; }
 }
 $("#refreshBtn").addEventListener("click", () => refresh(true));
@@ -682,7 +712,7 @@ async function openSettings() {
   $$("[data-mem]").forEach((b) => b.onclick = async () => { await api(`/api/memories/${b.dataset.mem}`, { method: "DELETE" }); b.parentElement.remove(); });
   loadGoogleStatus();
 }
-window.openSettings = openSettings;
+window.openSettings = guard(openSettings);
 
 function syncVoiceRows() {
   const e = $("#s_voice_engine").value;
@@ -697,44 +727,83 @@ function collectSettings() {
   return out;
 }
 
-$("#saveSettings").addEventListener("click", async () => {
+$("#saveSettings").addEventListener("click", guard(async () => {
   state.settings = await postJSON("/api/settings", collectSettings());
   $("#settings").classList.add("hidden");
   toast("Settings saved.");
-});
-$("#testVoice").addEventListener("click", async () => {
+}));
+$("#testVoice").addEventListener("click", guard(async () => {
   state.settings = await postJSON("/api/settings", collectSettings());
   const name = state.settings.user_name ? `, ${state.settings.user_name}` : "";
   speak(`Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}${name}. All systems are operational, and I'm at your service.`);
-});
-$("#settingsBtn").addEventListener("click", openSettings);
+}));
+$("#settingsBtn").addEventListener("click", guard(openSettings));
 $("#closeSettings").addEventListener("click", () => $("#settings").classList.add("hidden"));
 $("#settings").addEventListener("click", (e) => { if (e.target.id === "settings") $("#settings").classList.add("hidden"); });
-$("#resetChat").addEventListener("click", async () => { if (!confirm("Clear the conversation history?")) return; await postJSON("/api/reset"); chatEl.innerHTML = ""; toast("Conversation cleared."); });
+$("#resetChat").addEventListener("click", guard(async () => { if (!confirm("Clear the conversation history?")) return; await postJSON("/api/reset"); chatEl.innerHTML = ""; toast("Conversation cleared."); }));
+$("#shutdownBtn").addEventListener("click", guard(async () => {
+  if (!confirm("Shut JARVIS down? Your phone will lose connection until you start him again from the desktop icon.")) return;
+  await postJSON("/api/shutdown");
+  $("#settings").classList.add("hidden");
+  addMessage("jarvis", "Shutting down. Until next time.");
+  setTimeout(goOffline, 1200);
+}));
+$("#logsBtn").addEventListener("click", guard(async () => {
+  const { log, path } = await getJSON("/api/logs");
+  openModal("Diagnostics", `<p class="muted" style="margin:0">Log file: <code>${esc(path)}</code></p>
+    <pre class="logbox">${esc(log)}</pre>
+    <button type="button" class="btn" id="copyLog">Copy log</button>`);
+  $("#projectForm").onsubmit = (e) => e.preventDefault();
+  $("#copyLog").onclick = () => navigator.clipboard?.writeText(log).then(() => toast("Log copied."));
+}));
 $("#notifBtn").addEventListener("click", async () => {
   if (!("Notification" in window)) return toast("Notifications not supported here.", "warn");
   const p = await Notification.requestPermission(); toast(p === "granted" ? "Notifications enabled." : "Notifications blocked.");
 });
 
 let googlePoll = null;
+const isDesktop = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 async function loadGoogleStatus() {
   const st = await getJSON("/api/google/status");
   const el = $("#googleStatus");
-  if (st.connected) el.innerHTML = `Connected as <strong>${esc(st.email)}</strong>`;
-  else if (st.auth_running) el.textContent = "Waiting for you to finish signing in on the desktop browser…";
-  else if (!st.client_secret_present) el.innerHTML = `Missing <code>data/credentials.json</code>. Follow README → “Connect Google”.`;
-  else el.textContent = "Not connected." + (st.error ? ` (${st.error})` : "");
-  $("#googleConnect").classList.toggle("hidden", st.connected);
+  $("#googleSetup").classList.toggle("hidden", st.connected || st.client_secret_present);
+  $("#googleReupload").classList.toggle("hidden", st.connected || !st.client_secret_present);
+  if (st.connected) el.innerHTML = `✓ Connected as <strong>${esc(st.email)}</strong>`;
+  else if (st.auth_running) el.innerHTML = isDesktop
+    ? "A Google sign-in page has opened in your web browser. Choose your account, press <strong>Continue</strong> on the “unverified app” notice, tick all boxes and allow."
+    : "A Google sign-in page has opened <strong>on your computer's browser</strong> — finish signing in there.";
+  else if (!st.client_secret_present) el.innerHTML = "One-time setup: Google needs you to create a private key for JARVIS (about 10 minutes). Follow the steps below.";
+  else el.innerHTML = "Ready. Press <strong>Sign in with Google</strong>." + (st.error ? `<br><span class="err">${esc(st.error)}</span>` : "");
+  $("#googleConnect").classList.toggle("hidden", st.connected || !st.client_secret_present || st.auth_running);
   $("#googleDisconnect").classList.toggle("hidden", !st.connected);
   clearTimeout(googlePoll);
-  if (st.auth_running) googlePoll = setTimeout(async () => { await loadGoogleStatus(); refresh(true); }, 2500);
+  if (st.auth_running) googlePoll = setTimeout(async () => {
+    await loadGoogleStatus().catch(() => {});
+    if (!$("#googleConnect").classList.contains("hidden") || !$("#googleDisconnect").classList.contains("hidden")) refresh(true);
+  }, 2500);
 }
-$("#googleConnect").addEventListener("click", async () => {
-  const r = await postJSON("/api/google/connect"); toast(r.message); loadGoogleStatus();
-});
-$("#googleDisconnect").addEventListener("click", async () => {
+$("#googleConnect").addEventListener("click", guard(async () => {
+  const r = await postJSON("/api/google/connect"); toast(r.message); await loadGoogleStatus();
+}));
+$("#googleDisconnect").addEventListener("click", guard(async () => {
   if (!confirm("Disconnect your Google account from JARVIS?")) return;
-  await postJSON("/api/google/disconnect"); loadGoogleStatus(); refresh(true);
+  await postJSON("/api/google/disconnect"); await loadGoogleStatus(); refresh(true);
+}));
+async function uploadCredentials(file) {
+  if (!file) return;
+  const fd = new FormData(); fd.append("file", file, file.name);
+  await api("/api/google/credentials", { method: "POST", body: fd });
+  toast("Credentials saved. Now sign in with Google.");
+  await loadGoogleStatus();
+}
+$("#credFile").addEventListener("change", guard(async (e) => { await uploadCredentials(e.target.files[0]); e.target.value = ""; }));
+$("#credFile2").addEventListener("change", guard(async (e) => { await uploadCredentials(e.target.files[0]); e.target.value = ""; }));
+// Links in the setup guide: on the desktop open them in your normal browser (where you're signed in to Google).
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("a[data-ext]");
+  if (!a || !isDesktop) return;
+  e.preventDefault();
+  api("/api/open-url", { json: { url: a.href } }).catch(() => window.open(a.href, "_blank"));
 });
 
 /* ───────────────────────── mobile tabs ───────────────────────── */
@@ -749,7 +818,9 @@ setTab("assistant");
 
 /* ───────────────────────── boot ───────────────────────── */
 async function boot() {
-  const s = await (await fetch("/api/session")).json();
+  let s;
+  try { s = await (await fetch("/api/session", { cache: "no-store" })).json(); }
+  catch { goOffline(); return; }
   if (!s.authenticated) { showLogin(); return; }
   const health = await (await fetch("/api/health")).json();
   if (!health.gemini_key) { $("#sysPill").classList.add("bad"); toast("GEMINI_API_KEY missing in .env", "bad"); }
@@ -763,7 +834,7 @@ async function boot() {
     addMessage("jarvis", `Good ${h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"}. JARVIS online — how may I help? Tap the microphone, hold Space, or type.`);
   }
   await refresh();
-  setInterval(() => document.visibilityState === "visible" && refresh(), 60000);
+  if (!state.pollStarted) { state.pollStarted = true; setInterval(() => document.visibilityState === "visible" && !state.offline && refresh(), 60000); }
 }
 document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && refresh());
 
