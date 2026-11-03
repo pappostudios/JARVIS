@@ -724,6 +724,7 @@ async function openSettings() {
   }
   syncVoiceRows();
   $("#modelInfo").textContent = "Checking which Gemini models your key can use…";
+  fetch("/api/health").then((r) => r.json()).then((h) => { $("#versionInfo").textContent = `JARVIS version: ${h.version}`; }).catch(() => {});
   getJSON("/api/models").then((m) => {
     const sel = $("#s_model");
     sel.innerHTML = `<option value="auto">Automatic — fastest reliable model (recommended)</option>` +

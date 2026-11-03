@@ -61,12 +61,18 @@ def make_server() -> uvicorn.Server:
         use_colors=False,
     )
     _server = uvicorn.Server(cfg)
+    import jarvis
+
+    jarvis.SERVER = _server  # shared handle: works however this file was started
     return _server
 
 
 def request_shutdown() -> None:
-    if _server is not None:
-        _server.should_exit = True
+    import jarvis
+
+    srv = jarvis.SERVER or _server
+    if srv is not None:
+        srv.should_exit = True
 
 
 def serve() -> None:

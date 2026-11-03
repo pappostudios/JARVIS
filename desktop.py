@@ -104,6 +104,17 @@ def open_window() -> None:
     webbrowser.open(URL)
 
 
+def stop_running_jarvis() -> None:
+    """Ask a running JARVIS on this computer to shut down (uses the local admin token)."""
+    try:
+        token = (config.DATA_DIR / "admin.token").read_text().strip()
+        req = urllib.request.Request(URL + "api/shutdown", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json", "X-Admin-Token": token})
+        urllib.request.urlopen(req, timeout=5, context=_ctx)
+    except Exception as e:  # noqa: BLE001
+        print("  Could not ask the old JARVIS to stop:", e)
+
+
 def wait_for_port_free(timeout: float = 30) -> None:
     end = time.time() + timeout
     while time.time() < end and run_jarvis.port_in_use():
@@ -116,16 +127,26 @@ def main() -> None:
     if "--after-update" in sys.argv:
         wait_for_port_free()  # let the old version finish shutting down
 
-    # Already running? Just show the window.
+    # Already running? Use it if it's this version; otherwise replace the outdated copy.
     h = health()
     if h and h.get("app") == "jarvis":
-        print("  JARVIS is already running - opening the window.")
-        if show_window:
-            open_window()
-        return
+        from jarvis import version
+
+        if h.get("version") == version.current():
+            print("  JARVIS is already running - opening the window.")
+            if show_window:
+                open_window()
+            return
+        print(f"  An older JARVIS ({h.get('version', 'old version')}) is running - replacing it with {version.current()}.")
+        stop_running_jarvis()
+        wait_for_port_free()
     if run_jarvis.port_in_use():
-        alert(f"Port {config.PORT} is being used by another program.\n\n"
-              f"Change PORT in the .env file (e.g. PORT=8777) and start JARVIS again.")
+        if (health() or {}).get("app") == "jarvis":
+            alert("An older copy of JARVIS is still running and didn't stop.\n\n"
+                  "Open Task Manager (Ctrl+Shift+Esc), end every 'Python' / 'pythonw' task, then start JARVIS again.")
+        else:
+            alert(f"Port {config.PORT} is being used by another program.\n\n"
+                  f"Change PORT in the .env file (e.g. PORT=8777) and start JARVIS again.")
         sys.exit(1)
 
     server_thread = threading.Thread(target=run_jarvis.serve, name="jarvis-server", daemon=True)
@@ -145,7 +166,9 @@ def main() -> None:
         server_thread.join(5)
         print("  Goodbye, sir.")
         return
-    if not getattr(run_jarvis._server, "should_exit", False):
+    import jarvis
+
+    if not getattr(jarvis.SERVER, "should_exit", False):
         alert("JARVIS stopped unexpectedly.\n\nDetails are in data\\jarvis.log:\n\n" + logsetup.tail(15)[-1500:])
 
 

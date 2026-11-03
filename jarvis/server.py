@@ -53,8 +53,8 @@ async def auth_middleware(request: Request, call_next):
     if path.startswith("/api/") and path not in OPEN_PATHS and not _authed(request):
         return JSONResponse({"detail": "Access code required"}, status_code=401)
     resp = await call_next(request)
-    if path.startswith("/api/"):
-        resp.headers["Cache-Control"] = "no-store"
+    # API: never cache. Dashboard files: always re-check with the server, so updates show up immediately.
+    resp.headers["Cache-Control"] = "no-store" if path.startswith("/api/") else "no-cache"
     return resp
 
 
@@ -87,7 +87,14 @@ def session(request: Request):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "app": "jarvis", "gemini_key": bool(config.GEMINI_API_KEY), "model": jarvis.model}
+    return {"ok": True, "app": "jarvis", "version": _version(), "gemini_key": bool(config.GEMINI_API_KEY),
+            "model": jarvis.model}
+
+
+def _version() -> str:
+    from . import version
+
+    return version.current()
 
 
 @app.post("/api/shutdown")
