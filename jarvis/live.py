@@ -20,7 +20,7 @@ import anyio
 from fastapi import WebSocket
 from google.genai import types
 
-from . import agent, db, tools
+from . import agent, db, tools, usage
 
 log = logging.getLogger("jarvis.live")
 
@@ -160,6 +160,8 @@ class _Call:
     async def pump_out(self, session) -> str:
         while True:
             async for r in session.receive():
+                if r.usage_metadata:
+                    usage.record_tokens(self.model, "live", r.usage_metadata)
                 if r.session_resumption_update and r.session_resumption_update.resumable \
                         and r.session_resumption_update.new_handle:
                     self.handle = r.session_resumption_update.new_handle
@@ -226,12 +228,14 @@ async def handle(ws: WebSocket) -> None:
     models = await anyio.to_thread.run_sync(live_models)
     client = agent.jarvis._ensure_client()
     idx, minimal, reconnects, last_err = 0, False, 0, ""
+    connected_at: float | None = None
     while not call.hung_up and idx < len(models) and reconnects < 50:
         model = models[idx]
         try:
             cfg = await anyio.to_thread.run_sync(build_config, call.handle, minimal)
             async with client.aio.live.connect(model=model, config=cfg) as session:
                 call.model = model
+                connected_at = time.time()
                 await call.send(type="ready", model=model, resumed=bool(call.handle))
                 log.info("live call connected: %s%s", model, " (resumed)" if call.handle else "")
                 t_in = asyncio.create_task(call.pump_in(session))
@@ -239,6 +243,8 @@ async def handle(ws: WebSocket) -> None:
                 done, pending = await asyncio.wait({t_in, t_out}, return_when=asyncio.FIRST_COMPLETED)
                 for t in pending:
                     t.cancel()
+                usage.record_ok(model, "live", seconds=time.time() - connected_at)
+                connected_at = None
                 for t in done:
                     if t.exception() and not call.hung_up:
                         raise t.exception()  # type: ignore[misc]
@@ -251,6 +257,11 @@ async def handle(ws: WebSocket) -> None:
                 break
             last_err = str(e)
             log.warning("live session on %s ended: %r", model, e)
+            if call.model != model:
+                usage.record_error(model, "live", e)
+            elif connected_at:
+                usage.record_ok(model, "live", seconds=time.time() - connected_at)
+                connected_at = None
             low = last_err.lower()
             if call.model == model and "1011" not in low and "closed" in low and reconnects < 50:
                 reconnects += 1  # dropped mid-call: resume with the handle we have

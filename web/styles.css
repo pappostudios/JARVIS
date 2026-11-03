@@ -237,6 +237,7 @@ body.live-on .chips, body.live-on #micBtn, body.live-on #convBtn { display: none
 
 .drawer { width: min(520px, 100%); max-height: 92dvh; display: flex; flex-direction: column; background: var(--panel-solid); border: 1px solid var(--line-2); border-radius: 18px; padding: 18px 20px; box-shadow: 0 0 80px rgba(70, 217, 255, .1); }
 .drawer.small { width: min(440px, 100%); }
+.drawer.small.wide { width: min(680px, 100%); }
 .drawer-body { overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding-right: 4px; }
 .drawer section { display: flex; flex-direction: column; gap: 10px; }
 .drawer h3 { margin: 0; font: 600 12px var(--display); letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
@@ -272,6 +273,21 @@ body.live-on .chips, body.live-on #micBtn, body.live-on #convBtn { display: none
 .diag tr.ok td:first-child { color: var(--green); }
 .diag tr.bad td:first-child { color: var(--red); }
 .diag .muted { font-size: 11.5px; word-break: break-word; }
+
+.usage-verdict { border: 1px solid var(--line-2); background: rgba(70, 217, 255, .06); border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+.usage-verdict.warn { border-color: rgba(255, 181, 71, .45); background: rgba(255, 181, 71, .07); }
+.usage-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; }
+.usage-stats .stat-v { font-size: 22px; }
+.usage-chart { display: flex; align-items: flex-end; gap: 4px; height: 110px; padding-top: 6px; border-bottom: 1px solid var(--line); }
+.usage-chart .col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; height: 100%; min-width: 0; }
+.usage-chart .bar { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, var(--cyan), var(--cyan-dim)); min-height: 1px; }
+.usage-chart .bar.q { background: var(--amber); border-radius: 0; }
+.usage-chart .lbl { font: 9.5px var(--mono); color: var(--muted); white-space: nowrap; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.usage-table th { text-align: left; font: 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.usage-table td { padding: 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.usage-table td.n { text-align: right; font-family: var(--mono); white-space: nowrap; }
+.usage-table .bad { color: var(--amber); }
 
 /* toasts */
 .toasts { position: fixed; z-index: 60; top: 76px; right: 20px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }

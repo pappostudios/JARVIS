@@ -74,8 +74,26 @@ def _pcm_to_wav(pcm: bytes, rate: int = 24000) -> bytes:
 
 
 def _gemini_tts(text: str, voice: str) -> tuple[bytes, str]:
-    resp = _client().models.generate_content(
-        model=tts_model(),
+    from . import usage
+
+    model = tts_model()
+    try:
+        resp = _gemini_tts_call(model, text, voice)
+    except Exception as e:
+        usage.record_error(model, "voice", e)
+        raise
+    usage.record_ok(model, "voice", resp)
+    part = resp.candidates[0].content.parts[0]
+    data, mime = part.inline_data.data, (part.inline_data.mime_type or "")
+    if "wav" in mime or "mpeg" in mime or "mp3" in mime:
+        return data, mime
+    m = re.search(r"rate=(\d+)", mime)
+    return _pcm_to_wav(data, int(m.group(1)) if m else 24000), "audio/wav"
+
+
+def _gemini_tts_call(model: str, text: str, voice: str):
+    return _client().models.generate_content(
+        model=model,
         contents=TTS_STYLE + text,
         config=types.GenerateContentConfig(
             response_modalities=["AUDIO"],
@@ -84,12 +102,6 @@ def _gemini_tts(text: str, voice: str) -> tuple[bytes, str]:
             ),
         ),
     )
-    part = resp.candidates[0].content.parts[0]
-    data, mime = part.inline_data.data, (part.inline_data.mime_type or "")
-    if "wav" in mime or "mpeg" in mime or "mp3" in mime:
-        return data, mime
-    m = re.search(r"rate=(\d+)", mime)
-    return _pcm_to_wav(data, int(m.group(1)) if m else 24000), "audio/wav"
 
 
 async def _edge_tts(text: str, voice: str) -> tuple[bytes, str]:

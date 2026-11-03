@@ -63,9 +63,18 @@ def run() -> dict:
     simple_cfg = types.GenerateContentConfig(http_options=types.HttpOptions(timeout=22000))
     working = None
     for m in order:
-        r = _step(f"Simple reply from {m}",
-                  lambda m=m: (client.models.generate_content(model=m, contents="Reply with just: OK",
-                                                              config=simple_cfg).text or "").strip(), 20)
+        def simple(m=m) -> str:
+            from . import usage
+
+            try:
+                resp = client.models.generate_content(model=m, contents="Reply with just: OK", config=simple_cfg)
+            except Exception as e:
+                usage.record_error(m, "test", e)
+                raise
+            usage.record_ok(m, "test", resp)
+            return (resp.text or "").strip()
+
+        r = _step(f"Simple reply from {m}", simple, 20)
         steps.append(r)
         if r["ok"] and not working:
             working = m

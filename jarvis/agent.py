@@ -10,7 +10,7 @@ from typing import Any, Iterator
 from google import genai
 from google.genai import errors, types
 
-from . import config, db, projects, tools
+from . import config, db, projects, tools, usage
 
 log = logging.getLogger("jarvis.agent")
 
@@ -264,6 +264,7 @@ class Jarvis:
                     fut = _POOL.submit(client.models.generate_content, model=model,
                                        contents=list(self.history), config=cfg)
                     resp = fut.result(timeout=wait_s)  # hard deadline enforced by JARVIS
+                    usage.record_ok(model, "chat", resp, time.time() - t0)
                     log.info("gemini %s ok in %.1fs (thinking=%s)", model, time.time() - t0,
                              thinking[t_idx].model_dump(exclude_none=True) if thinking[t_idx] else "default")
                     self._thinking_ok[(model, level)] = t_idx  # remember the form this model accepts
@@ -271,6 +272,7 @@ class Jarvis:
                     return resp
                 except errors.ClientError as e:
                     last_err = e
+                    usage.record_error(model, "chat", e)
                     log.warning("gemini %s error %s after %.1fs: %s", model, e.code, time.time() - t0, str(e)[:300])
                     if e.code == 400 and "think" in str(e).lower():
                         t_idx += 1  # this model doesn't accept that thinking setting; try the next form
@@ -287,12 +289,14 @@ class Jarvis:
                     raise
                 except errors.ServerError as e:
                     last_err = e
+                    usage.record_error(model, "chat", e)
                     log.warning("gemini %s server error %s after %.1fs: %s", model, e.code, time.time() - t0, str(e)[:300])
                     slow = e.code == 504
                     self._cooldown[model] = time.time() + (TIMEOUT_COOLDOWN_S if slow else OVERLOAD_COOLDOWN_S)
                     overloaded.append(f"{model} ({'too slow' if slow else e.code})")
                     break  # move straight on to the next model
                 except concurrent.futures.TimeoutError:
+                    usage.record_error(model, "chat", "timeout")
                     log.warning("gemini %s gave no answer within %.0fs - switching model", model, wait_s)
                     self._cooldown[model] = time.time() + TIMEOUT_COOLDOWN_S
                     overloaded.append(f"{model} (no answer in {wait_s:.0f}s)")
@@ -382,12 +386,21 @@ class Jarvis:
         """Single stateless call (used for transcription etc.)."""
         client = self._ensure_client()
         contents: list[Any] = list(parts or []) + [prompt]
+        m = model or config.GEMINI_FAST_MODEL
         try:
-            resp = client.models.generate_content(model=model or config.GEMINI_FAST_MODEL, contents=contents)
+            resp = client.models.generate_content(model=m, contents=contents)
+            usage.record_ok(m, "transcribe", resp)
         except errors.ClientError as e:
-            if e.code != 404:
+            usage.record_error(m, "transcribe", e)
+            if e.code not in (404, 429):
                 raise
-            resp = client.models.generate_content(model=self.model, contents=contents)
+            m = self.model  # fast model missing or out of quota: use the main model
+            try:
+                resp = client.models.generate_content(model=m, contents=contents)
+                usage.record_ok(m, "transcribe", resp)
+            except Exception as e2:
+                usage.record_error(m, "transcribe", e2)
+                raise
         return (resp.text or "").strip()
 
 

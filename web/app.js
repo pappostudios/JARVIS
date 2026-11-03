@@ -811,7 +811,8 @@ $("#taskForm").addEventListener("submit", async (e) => {
   refresh();
 });
 
-function openModal(title, html) {
+function openModal(title, html, wide = false) {
+  $("#projectForm").classList.toggle("wide", wide);
   $("#projectModalTitle").textContent = title;
   $("#projectModalBody").innerHTML = html;
   $("#projectModal").classList.remove("hidden");
@@ -932,6 +933,42 @@ $("#shutdownBtn").addEventListener("click", guard(async () => {
   addMessage("jarvis", "Shutting down. Until next time.");
   setTimeout(goOffline, 1200);
 }));
+$("#usageBtn").addEventListener("click", guard(async () => {
+  const u = await getJSON("/api/usage?days=14");
+  const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
+  const max = Math.max(1, ...u.days.map((d) => d.requests));
+  const t = u.today;
+  const chart = u.days.map((d) => {
+    const okH = Math.round(((d.requests - d.quota_errors) / max) * 88), qH = Math.round((d.quota_errors / max) * 88);
+    const dt = new Date(d.day + "T12:00");
+    return `<div class="col" title="${d.day}: ${d.requests} requests, ${d.quota_errors} refused (quota)">
+      ${qH ? `<div class="bar q" style="height:${qH}px"></div>` : ""}<div class="bar" style="height:${okH}px"></div>
+      <span class="lbl">${dt.toLocaleDateString("en-GB", { day: "numeric" })}</span></div>`;
+  }).join("");
+  const models = u.models_today.map((m) => `<tr><td>${esc(m.model)}<div class="muted" style="font-size:11px">${esc(m.kinds.join(", "))}</div></td>
+      <td class="n">${m.requests}</td><td class="n ${m.quota_errors ? "bad" : ""}">${m.quota_errors}${m.last_quota_error ? ` <span class="muted">(${m.last_quota_error})</span>` : ""}</td>
+      <td class="n">${fmt(m.tokens)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">No requests yet today.</td></tr>`;
+  const est = u.estimates.map((e) => `<tr><td>${esc(e.label)}</td><td class="n">$${e.so_far.toFixed(3)}</td><td class="n">~$${e.per_month.toFixed(2)}</td></tr>`).join("");
+  openModal("Usage & free tier", `
+    <div class="usage-verdict ${u.quota_days ? "warn" : ""}">${esc(u.verdict)}</div>
+    <section><h3>Today</h3>
+      <div class="usage-stats">
+        <div><span class="stat-v">${t.requests}</span><span class="stat-l">Gemini requests</span></div>
+        <div><span class="stat-v" style="${t.quota_errors ? "color:var(--amber)" : ""}">${t.quota_errors}</span><span class="stat-l">Refused (quota)</span></div>
+        <div><span class="stat-v">${fmt(t.input_tokens + t.output_tokens)}</span><span class="stat-l">Tokens</span></div>
+        <div><span class="stat-v">${t.live_minutes.toFixed(1)}</span><span class="stat-l">Live minutes</span></div>
+      </div></section>
+    <section><h3>Last 14 days</h3><div class="usage-chart">${chart}</div>
+      <p class="muted" style="margin:0;font-size:12px">Blue = answered · amber = refused because a free-tier limit was reached.</p></section>
+    <section><h3>Models used today</h3>
+      <table class="usage-table"><tr><th>Model</th><th>Requests</th><th>Refused</th><th>Tokens</th></tr>${models}</table></section>
+    <section><h3>If you upgraded to the paid tier</h3>
+      <table class="usage-table"><tr><th>Priced as</th><th>Last 14 days</th><th>Per month</th></tr>${est}</table>
+      <p class="muted" style="margin:0;font-size:12px">Estimate from your real token use, as if all of it ran on Gemini 3.8 Flash (the priciest Flash). Flash-Lite would cost several times less. Live calls are billed by audio and aren't included.</p></section>
+    <section><h3>Google's own view</h3>
+      <p class="muted" style="margin:0;font-size:12.5px">Exact free-tier limits and remaining quota per model: <a data-ext target="_blank" rel="noopener" href="https://aistudio.google.com/rate-limit" style="color:var(--cyan)">ai.dev/rate-limit</a></p></section>`, true);
+  $("#projectForm").onsubmit = (e) => e.preventDefault();
+}));
 $("#logsBtn").addEventListener("click", guard(async () => {
   const { log, path } = await getJSON("/api/logs");
   openModal("Diagnostics", `
@@ -942,7 +979,7 @@ $("#logsBtn").addEventListener("click", guard(async () => {
     <section><h3>Log</h3>
       <p class="muted" style="margin:0">File: <code>${esc(path)}</code></p>
       <pre class="logbox">${esc(log)}</pre>
-      <button type="button" class="btn" id="copyLog">Copy log</button></section>`);
+      <button type="button" class="btn" id="copyLog">Copy log</button></section>`, true);
   $("#projectForm").onsubmit = (e) => e.preventDefault();
   $("#copyLog").onclick = () => navigator.clipboard?.writeText(log).then(() => toast("Log copied."));
   $("#testGemini").onclick = guard(async () => {

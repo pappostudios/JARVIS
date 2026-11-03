@@ -165,6 +165,13 @@ def diagnose_gemini():
     return diagnose.run()
 
 
+@app.get("/api/usage")
+def usage_summary(days: int = 14):
+    from . import usage
+
+    return usage.summary(max(1, min(days, 60)))
+
+
 @app.get("/api/logs")
 def logs():
     return {"log": logsetup.tail(200), "path": str(logsetup.LOG_FILE)}
