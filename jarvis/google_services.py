@@ -94,6 +94,16 @@ def _friendly_oauth_error(code: str) -> str:
     return f"Google returned an error: {code}. Press 'Sign in with Google' to try again."
 
 
+def _granted_scopes(token: dict) -> set[str]:
+    """Scopes Google actually granted. oauthlib gives a list; raw responses give a space-separated string."""
+    sc = token.get("scope")
+    if not sc:
+        return set(SCOPES)  # Google omitted it: everything requested was granted
+    if isinstance(sc, str):
+        return set(sc.split())
+    return {str(x) for x in sc}
+
+
 def run_auth_flow(open_browser: bool = True, attempt: int | None = None) -> None:
     """OAuth sign-in on THIS computer: opens Google in the browser, waits for the redirect back.
     A newer attempt (pressing the button again) silently supersedes this one."""
@@ -155,8 +165,7 @@ def run_auth_flow(open_browser: bool = True, attempt: int | None = None) -> None
     if "error" in qs:
         raise PermissionError(_friendly_oauth_error(qs["error"][0]))
     flow.fetch_token(code=qs["code"][0])
-    granted = set(str(flow.oauth2session.token.get("scope", "")).split())
-    missing = [s_ for s_ in SCOPES if granted and s_ not in granted]
+    missing = [s_ for s_ in SCOPES if s_ not in _granted_scopes(flow.oauth2session.token)]
     if missing:
         raise PermissionError("Google sign-in worked, but not every permission box was ticked. Press 'Sign in with "
                               "Google' again and tick ALL the boxes (Calendar and Gmail) so JARVIS can help you.")
