@@ -172,6 +172,19 @@ def usage_summary(days: int = 14):
     return usage.summary(max(1, min(days, 60)))
 
 
+class ClientError(BaseModel):
+    message: str
+    page: str = ""
+
+
+@app.post("/api/client-error")
+def client_error(body: ClientError):
+    import logging
+
+    logging.getLogger("jarvis.dashboard").error("dashboard error: %s (%s)", body.message[:2000], body.page[:200])
+    return {"ok": True}
+
+
 @app.get("/api/logs")
 def logs():
     return {"log": logsetup.tail(200), "path": str(logsetup.LOG_FILE)}

@@ -1,5 +1,5 @@
 /* Service worker: makes the dashboard installable and loads the shell instantly. API calls are never cached. */
-const CACHE = "jarvis-shell-v3";
+const CACHE = "jarvis-shell-v4";
 const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.webmanifest", "/icons/icon.svg", "/icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {
@@ -12,8 +12,10 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   // network first, fall back to cache when the desktop is unreachable
+  // pages are fetched as-is; other files by URL with no-cache so an update is always picked up
+  const live = e.request.mode === "navigate" ? fetch(e.request) : fetch(url.href, { cache: "no-cache", credentials: "same-origin" });
   e.respondWith(
-    fetch(e.request, { cache: "no-cache" }).then((r) => {
+    live.then((r) => {
       const copy = r.clone();
       caches.open(CACHE).then((c) => c.put(e.request, copy));
       return r;

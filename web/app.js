@@ -11,6 +11,26 @@ try { state.notified = new Set(JSON.parse(localStorage.getItem("jarvis.notified"
 try { state.convMode = localStorage.getItem("jarvis.conv") === "1"; } catch {}
 try { state.taskFilter = localStorage.getItem("jarvis.taskFilter") || ""; } catch {}
 
+/* ───────────────────────── error reporting ─────────────────────────
+   Any script error is shown on screen and written to the JARVIS log (Settings → Diagnostics). */
+function reportError(msg) {
+  try {
+    console.error(msg);
+    const t = document.getElementById("toasts");
+    if (t) { const el = document.createElement("div"); el.className = "toast bad"; el.textContent = "Dashboard error: " + msg; t.appendChild(el); setTimeout(() => el.remove(), 12000); }
+    fetch("/api/client-error", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: String(msg).slice(0, 2000), page: location.href }) }).catch(() => {});
+  } catch {}
+}
+window.addEventListener("error", (e) => reportError(`${e.message} (${(e.filename || "").split("/").pop()}:${e.lineno})`));
+window.addEventListener("unhandledrejection", (e) => { const m = e.reason?.message || String(e.reason); if (m !== "Not authenticated") reportError(m); });
+/* Attach to a page element; if it's missing (e.g. an outdated cached page) report it instead of crashing the script. */
+function el$(sel) {
+  const node = document.querySelector(sel);
+  if (node) return node;
+  reportError(`missing element ${sel} — press Ctrl+Shift+R to reload`);
+  return { addEventListener() {}, setAttribute() {}, classList: { add() {}, remove() {}, toggle() {} } };
+}
+
 /* ───────────────────────── API ───────────────────────── */
 async function api(path, opts = {}) {
   const init = { credentials: "same-origin", ...opts, headers: { ...(opts.headers || {}) } };
@@ -98,7 +118,7 @@ function toast(text, kind = "") {
 
 /* ───────────────────────── auth ───────────────────────── */
 function showLogin() { $("#login").classList.remove("hidden"); setTimeout(() => $("#loginCode").focus(), 50); }
-$("#loginForm").addEventListener("submit", async (e) => {
+el$("#loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("#loginErr").textContent = "";
   try {
@@ -399,7 +419,7 @@ async function startListening(auto = false) {
 
 function stopListening() { if (recorder && recorder.state !== "inactive") recorder.stop(); }
 
-$("#micBtn").addEventListener("click", () => startListening());
+el$("#micBtn").addEventListener("click", () => startListening());
 // Push-to-talk: hold Space when not typing
 let spaceHeld = false;
 document.addEventListener("keydown", (e) => {
@@ -414,7 +434,7 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("keyup", (e) => {
   if (e.code === "Space" && spaceHeld) { spaceHeld = false; stopListening(); }
 });
-$("#convBtn").addEventListener("click", () => {
+el$("#convBtn").addEventListener("click", () => {
   state.convMode = !state.convMode;
   $("#convBtn").setAttribute("aria-pressed", state.convMode);
   try { localStorage.setItem("jarvis.conv", state.convMode ? "1" : "0"); } catch {}
@@ -572,9 +592,9 @@ function stopLive(remote = false) {
   if (remote) setTimeout(() => state.coreMode === "idle" && core.set("idle"), 2500);
 }
 
-$("#liveBtn").addEventListener("click", () => startLive());
+el$("#liveBtn").addEventListener("click", () => startLive());
 // Tap the core while JARVIS is talking in a call to cut him off.
-$("#core").addEventListener("click", () => { if (live.active && liveSpeaking()) { liveFlush(); live.dropAudio = true; } });
+el$("#core").addEventListener("click", () => { if (live.active && liveSpeaking()) { liveFlush(); live.dropAudio = true; } });
 
 /* ───────────────────────── chat ───────────────────────── */
 const chatEl = $("#chat");
@@ -652,7 +672,7 @@ async function send(text) {
 }
 
 const input = $("#input");
-$("#composer").addEventListener("submit", (e) => {
+el$("#composer").addEventListener("submit", (e) => {
   e.preventDefault(); state.lastInputWasVoice = false; const t = input.value.trim(); input.value = ""; autoGrow();
   if (!t) return;
   if (live.active && live.ws?.readyState === 1) { liveBubble("user", t); live.ws.send(JSON.stringify({ type: "text", text: t })); return; }
@@ -766,8 +786,8 @@ function setTaskFilter(value) {
   $$("#projects li[data-id]").forEach((li) => li.classList.toggle("selected", li.dataset.id === state.taskFilter));
   renderTasks(state.overview?.tasks || []);
 }
-$("#taskProject").addEventListener("change", (e) => setTaskFilter(e.target.value));
-$("#prioritiseBtn").addEventListener("click", () => {
+el$("#taskProject").addEventListener("change", (e) => setTaskFilter(e.target.value));
+el$("#prioritiseBtn").addEventListener("click", () => {
   setTaskFilter("priority");
   setTab("assistant");
   send("Look at all my open tasks, projects, deadlines and today's calendar, and give me a prioritised to-do list: " +
@@ -880,10 +900,10 @@ async function refresh(force = false) {
   catch (e) { if (e.message !== "Not authenticated" && !state.offline) { $("#sysPill").classList.add("bad"); $("#sysText").textContent = "Error"; console.warn(e); } }
   finally { refreshing = false; }
 }
-$("#refreshBtn").addEventListener("click", () => refresh(true));
+el$("#refreshBtn").addEventListener("click", () => refresh(true));
 
 /* tasks & projects quick add */
-$("#taskForm").addEventListener("submit", async (e) => {
+el$("#taskForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = $("#taskInput").value.trim(); if (!title) return;
   $("#taskInput").value = "";
@@ -899,9 +919,9 @@ function openModal(title, html, wide = false) {
   $("#projectModal").classList.remove("hidden");
 }
 $$("#projectModal [data-close]").forEach((b) => b.onclick = () => $("#projectModal").classList.add("hidden"));
-$("#projectModal").addEventListener("click", (e) => { if (e.target.id === "projectModal") $("#projectModal").classList.add("hidden"); });
+el$("#projectModal").addEventListener("click", (e) => { if (e.target.id === "projectModal") $("#projectModal").classList.add("hidden"); });
 
-$("#addProjectBtn").addEventListener("click", () => {
+el$("#addProjectBtn").addEventListener("click", () => {
   openModal("New project", `
     <label>Name<input id="pName" required></label>
     <label>Goal / description<textarea id="pDesc" rows="3"></textarea></label>
@@ -985,7 +1005,7 @@ function syncVoiceRows() {
   $("#geminiVoiceRow").classList.toggle("hidden", e !== "gemini");
   $("#edgeVoiceRow").classList.toggle("hidden", e !== "edge");
 }
-$("#s_voice_engine").addEventListener("change", syncVoiceRows);
+el$("#s_voice_engine").addEventListener("change", syncVoiceRows);
 
 function collectSettings() {
   const out = {};
@@ -993,28 +1013,28 @@ function collectSettings() {
   return out;
 }
 
-$("#saveSettings").addEventListener("click", guard(async () => {
+el$("#saveSettings").addEventListener("click", guard(async () => {
   state.settings = await postJSON("/api/settings", collectSettings());
   $("#settings").classList.add("hidden");
   toast("Settings saved.");
 }));
-$("#testVoice").addEventListener("click", guard(async () => {
+el$("#testVoice").addEventListener("click", guard(async () => {
   state.settings = await postJSON("/api/settings", collectSettings());
   const name = state.settings.user_name ? `, ${state.settings.user_name}` : "";
   speak(`Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}${name}. All systems are operational, and I'm at your service.`);
 }));
-$("#settingsBtn").addEventListener("click", guard(openSettings));
-$("#closeSettings").addEventListener("click", () => $("#settings").classList.add("hidden"));
-$("#settings").addEventListener("click", (e) => { if (e.target.id === "settings") $("#settings").classList.add("hidden"); });
-$("#resetChat").addEventListener("click", guard(async () => { if (!confirm("Clear the conversation history?")) return; await postJSON("/api/reset"); chatEl.innerHTML = ""; toast("Conversation cleared."); }));
-$("#shutdownBtn").addEventListener("click", guard(async () => {
+el$("#settingsBtn").addEventListener("click", guard(openSettings));
+el$("#closeSettings").addEventListener("click", () => $("#settings").classList.add("hidden"));
+el$("#settings").addEventListener("click", (e) => { if (e.target.id === "settings") $("#settings").classList.add("hidden"); });
+el$("#resetChat").addEventListener("click", guard(async () => { if (!confirm("Clear the conversation history?")) return; await postJSON("/api/reset"); chatEl.innerHTML = ""; toast("Conversation cleared."); }));
+el$("#shutdownBtn").addEventListener("click", guard(async () => {
   if (!confirm("Shut JARVIS down? Your phone will lose connection until you start him again from the desktop icon.")) return;
   await postJSON("/api/shutdown");
   $("#settings").classList.add("hidden");
   addMessage("jarvis", "Shutting down. Until next time.");
   setTimeout(goOffline, 1200);
 }));
-$("#usageBtn").addEventListener("click", guard(async () => {
+el$("#usageBtn").addEventListener("click", guard(async () => {
   const u = await getJSON("/api/usage?days=14");
   const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
   const max = Math.max(1, ...u.days.map((d) => d.requests));
@@ -1051,7 +1071,7 @@ $("#usageBtn").addEventListener("click", guard(async () => {
       <p class="muted" style="margin:0;font-size:12.5px">Exact free-tier limits and remaining quota per model: <a data-ext target="_blank" rel="noopener" href="https://aistudio.google.com/rate-limit" style="color:var(--cyan)">ai.dev/rate-limit</a></p></section>`, true);
   $("#projectForm").onsubmit = (e) => e.preventDefault();
 }));
-$("#logsBtn").addEventListener("click", guard(async () => {
+el$("#logsBtn").addEventListener("click", guard(async () => {
   const { log, path } = await getJSON("/api/logs");
   openModal("Diagnostics", `
     <section><h3>Gemini connection test</h3>
@@ -1076,7 +1096,7 @@ $("#logsBtn").addEventListener("click", guard(async () => {
     } finally { btn.disabled = false; btn.textContent = "Test Gemini"; }
   });
 }));
-$("#notifBtn").addEventListener("click", async () => {
+el$("#notifBtn").addEventListener("click", async () => {
   if (!("Notification" in window)) return toast("Notifications not supported here.", "warn");
   const p = await Notification.requestPermission(); toast(p === "granted" ? "Notifications enabled." : "Notifications blocked.");
 });
@@ -1089,7 +1109,8 @@ async function loadGoogleStatus() {
   $("#googleSetup").classList.toggle("hidden", st.connected || st.client_secret_present);
   $("#googleReupload").classList.toggle("hidden", st.connected || !st.client_secret_present);
   const accs = st.accounts || [];
-  $("#googleAccounts").innerHTML = accs.map((a) => `<li data-email="${esc(a.email)}">
+  const accList = $("#googleAccounts") || { innerHTML: "" };
+  accList.innerHTML = accs.map((a) => `<li data-email="${esc(a.email)}">
       <span class="acc-email">${a.ok ? "✓" : "⚠"} ${esc(a.email)} ${a.default ? "<small>· default</small>" : ""}</span>
       <button class="mini" data-acc-remove title="Disconnect this account">Disconnect</button>
       <div class="acc-row"><input class="acc-label" value="${esc(a.label)}" placeholder="label, e.g. work" maxlength="30" aria-label="Label">
@@ -1130,12 +1151,12 @@ async function loadGoogleStatus() {
     refresh(true);
   }, 2500);
 }
-$("#googleConnect").addEventListener("click", guard(async () => {
+el$("#googleConnect").addEventListener("click", guard(async () => {
   state.lastAdded = null;
   const r = await postJSON("/api/google/connect"); toast(r.message); await loadGoogleStatus();
 }));
-$("#googleCancel").addEventListener("click", guard(async () => { await postJSON("/api/google/cancel"); await loadGoogleStatus(); }));
-$("#googleReopen").addEventListener("click", guard(async () => {
+el$("#googleCancel").addEventListener("click", guard(async () => { await postJSON("/api/google/cancel"); await loadGoogleStatus(); }));
+el$("#googleReopen").addEventListener("click", guard(async () => {
   const url = $("#googleReopen").dataset.url; if (!url) return;
   if (isDesktop) await postJSON("/api/open-url", { url }); else window.open(url, "_blank");
 }));
@@ -1146,8 +1167,8 @@ async function uploadCredentials(file) {
   toast("Credentials saved. Now sign in with Google.");
   await loadGoogleStatus();
 }
-$("#credFile").addEventListener("change", guard(async (e) => { await uploadCredentials(e.target.files[0]); e.target.value = ""; }));
-$("#credFile2").addEventListener("change", guard(async (e) => { await uploadCredentials(e.target.files[0]); e.target.value = ""; }));
+el$("#credFile").addEventListener("change", guard(async (e) => { await uploadCredentials(e.target.files[0]); e.target.value = ""; }));
+el$("#credFile2").addEventListener("change", guard(async (e) => { await uploadCredentials(e.target.files[0]); e.target.value = ""; }));
 // Links in the setup guide: on the desktop open them in your normal browser (where you're signed in to Google).
 document.addEventListener("click", (e) => {
   const a = e.target.closest("a[data-ext]");
@@ -1167,12 +1188,12 @@ function showUpdate(info) {
   box.innerHTML = `<strong style="color:var(--cyan)">A new version is available.</strong><ul>${info.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`;
   $("#applyUpdateBtn").classList.remove("hidden");
 }
-$("#checkUpdateBtn").addEventListener("click", guard(async () => {
+el$("#checkUpdateBtn").addEventListener("click", guard(async () => {
   $("#updateInfo").textContent = "Checking GitHub for updates…";
   try { showUpdate(await getJSON("/api/update/check")); }
   catch (e) { $("#updateInfo").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
 }));
-$("#applyUpdateBtn").addEventListener("click", guard(async () => {
+el$("#applyUpdateBtn").addEventListener("click", guard(async () => {
   $("#applyUpdateBtn").disabled = true;
   await postJSON("/api/update/apply");
   state.updating = true;
