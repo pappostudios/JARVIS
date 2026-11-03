@@ -315,6 +315,8 @@ body.live-on .chips, body.live-on #micBtn, body.live-on #convBtn { display: none
 .seg button.on { background: rgba(70, 217, 255, .14); color: var(--cyan); box-shadow: inset 0 0 0 1px var(--line-2); }
 .seg button i { font-style: normal; font-family: var(--mono); font-weight: 400; letter-spacing: 0; opacity: .8; margin-left: 4px; }
 
+.msg .model-note { color: var(--amber); }
+
 /* toasts */
 .toasts { position: fixed; z-index: 60; top: 76px; right: 20px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
 .toast { pointer-events: auto; background: var(--panel-solid); border: 1px solid var(--line-2); border-left: 3px solid var(--cyan); padding: 10px 14px; border-radius: 10px; max-width: 340px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); animation: rise .25s; font-size: 13px; }

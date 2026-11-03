@@ -617,6 +617,11 @@ function addMessage(role, text, extra = {}) {
     tl.textContent = meta.join("   ");
     el.appendChild(tl);
   }
+  if (extra.note) {
+    const nt = document.createElement("div"); nt.className = "tools model-note";
+    nt.textContent = "⚠ " + extra.note;
+    el.appendChild(nt);
+  }
   chatEl.appendChild(el);
   chatEl.scrollTop = chatEl.scrollHeight;
   return el;
@@ -665,7 +670,7 @@ async function send(text) {
   if (reply.error) {
     addMessage("jarvis", "⚠ " + reply.text, { error: true }); core.set("idle");
   } else {
-    addMessage("jarvis", reply.text, { tools: reply.tools, model: reply.model, seconds: reply.seconds });
+    addMessage("jarvis", reply.text, { tools: reply.tools, model: reply.model, seconds: reply.seconds, note: reply.note });
     if (state.settings.auto_speak !== "false") speak(reply.text); else core.set("idle");
     if (reply.tools?.length) refresh(true);
   }
@@ -1000,7 +1005,7 @@ function checkReminders() {
 setInterval(checkReminders, 30000);
 
 /* ───────────────────────── settings ───────────────────────── */
-const SETTING_FIELDS = ["daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
+const SETTING_FIELDS = ["model_strict", "daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
 
 async function openSettings() {
   $("#settings").classList.remove("hidden");
@@ -1017,7 +1022,7 @@ async function openSettings() {
   getJSON("/api/models").then((m) => {
     const sel = $("#s_model");
     sel.innerHTML = `<option value="auto">Automatic — fastest reliable model (recommended)</option>` +
-      m.available.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+      m.available.map((n) => `<option value="${esc(n)}">${esc(n)}${n in (m.unavailable || {}) ? ` — unavailable: ${esc(m.unavailable[n] || "failed recently")}` : ""}</option>`).join("");
     if (m.setting !== "auto" && !m.available.includes(m.setting)) sel.insertAdjacentHTML("beforeend", `<option value="${esc(m.setting)}">${esc(m.setting)}</option>`);
     sel.value = m.setting;
     $("#modelInfo").innerHTML = `Last answer came from <strong>${esc(m.last_used || "—")}</strong>. Automatic order: ${esc(m.order.slice(0, 4).join(" → "))}`;

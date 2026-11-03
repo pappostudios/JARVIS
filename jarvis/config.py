@@ -64,7 +64,8 @@ DEFAULT_SETTINGS = {
     "work_start": "09:00",
     "work_end": "18:00",
     "require_confirmation": "true",  # ask before sending email / inviting people / deleting events
-    "model": "auto",              # "auto" or a specific Gemini model id
+    "model": "auto",
+    "model_strict": "false",      # true = never fall back from the chosen model              # "auto" or a specific Gemini model id
     "daily_request_limit": "0",   # max Gemini requests per day (0 = no limit); Live calls not counted
     "thinking": "fast",           # fast | balanced | deep — how long Gemini reasons before answering
     "about_me": "",               # free text: role, company, preferences

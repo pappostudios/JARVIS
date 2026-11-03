@@ -395,8 +395,11 @@ def models():
         order = jarvis.model_order()
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Couldn't list Gemini models: {e}") from e
-    return {"last_used": jarvis.last_model, "order": order, "available": avail,
-            "setting": db.get_setting("model") or "auto"}
+    import time as _t
+
+    unavailable = {m: jarvis._why.get(m, "") for m, until in jarvis._cooldown.items() if until > _t.time()}
+    return {"last_used": jarvis.last_model, "order": order, "available": avail, "unavailable": unavailable,
+            "setting": db.get_setting("model") or "auto", "strict": db.get_setting("model_strict") == "true"}
 
 
 @app.get("/api/google/status")

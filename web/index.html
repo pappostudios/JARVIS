@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
@@ -183,6 +183,7 @@
           <label>Brain (Gemini model)
             <select id="s_model"><option value="auto">Automatic — fastest reliable model (recommended)</option></select>
           </label>
+          <label class="switch"><input type="checkbox" id="s_model_strict"><span>Only use this model (no automatic backups — if it fails, JARVIS tells you instead)</span></label>
           <label>Response speed
             <select id="s_thinking">
               <option value="fast">Fast — quick answers (recommended)</option>
@@ -259,6 +260,6 @@
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

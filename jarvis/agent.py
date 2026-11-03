@@ -121,6 +121,14 @@ def _system_prompt() -> str:
     return "\n".join(parts)
 
 
+def _plain_reason(e: Exception) -> str:
+    text = str(e)
+    if "no longer available" in text.lower():
+        return "Google no longer offers it to new users (404)"
+    code = getattr(e, "code", "")
+    return {404: "not available to your API key (404)", 403: "not allowed for your API key (403)"}.get(code, f"error {code}")
+
+
 def _retry_delay(e: Exception) -> float | None:
     """Seconds Google asks us to wait (RetryInfo.retryDelay), if given."""
     import re
@@ -138,6 +146,8 @@ class Jarvis:
         self._decls: list[types.FunctionDeclaration] | None = None
         self._thinking_ok: dict[tuple[str, str], int] = {}
         self._cooldown: dict[str, float] = {}
+        self._why: dict[str, str] = {}        # last reason each model failed, in plain words
+        self.fallback_note: str | None = None
         self._available: list[str] | None = None
         self.last_model: str | None = None
         self._restore_history()
@@ -253,7 +263,13 @@ class Jarvis:
         client = self._ensure_client()
         ordered = self.model_order()
         now = time.time()
-        models = [m for m in ordered if self._cooldown.get(m, 0) < now] or ordered
+        chosen = (db.get_setting("model") or "auto").strip()
+        strict = chosen != "auto" and db.get_setting("model_strict") == "true"
+        if strict:
+            models = [chosen]  # "Only use this model": no backups, even if it failed recently
+        else:
+            models = [m for m in ordered if self._cooldown.get(m, 0) < now] or ordered
+        self.fallback_note = None
         last_err: Exception | None = None
         overloaded: list[str] = []
         quota: list[str] = []
@@ -283,6 +299,9 @@ class Jarvis:
                              thinking[t_idx].model_dump(exclude_none=True) if thinking[t_idx] else "default")
                     self._thinking_ok[(model, level)] = t_idx  # remember the form this model accepts
                     self.last_model = self.model = model
+                    if chosen != "auto" and model != chosen:
+                        why = self._why.get(chosen, "skipped after failing recently")
+                        self.fallback_note = f"Your chosen model {chosen} is unavailable ({why}), so {model} answered."
                     return resp
                 except errors.ClientError as e:
                     last_err = e
@@ -292,6 +311,7 @@ class Jarvis:
                         t_idx += 1  # this model doesn't accept that thinking setting; try the next form
                         continue
                     if e.code in (404, 403) or (e.code == 400 and "model" in str(e).lower()):
+                        self._why[model] = _plain_reason(e)
                         self._cooldown[model] = time.time() + 24 * 3600
                         break  # model not available to this key: try the next model
                     if e.code == 429:
@@ -299,6 +319,7 @@ class Jarvis:
                         delay = _retry_delay(e)
                         self._cooldown[model] = time.time() + (delay if delay and delay <= 300 else QUOTA_COOLDOWN_S)
                         quota.append(model)
+                        self._why[model] = "free-tier quota used up (429)"
                         break
                     raise
                 except errors.ServerError as e:
@@ -308,12 +329,14 @@ class Jarvis:
                     slow = e.code == 504
                     self._cooldown[model] = time.time() + (TIMEOUT_COOLDOWN_S if slow else OVERLOAD_COOLDOWN_S)
                     overloaded.append(f"{model} ({'too slow' if slow else e.code})")
+                    self._why[model] = "too slow (504)" if slow else f"Google overloaded ({e.code})"
                     break  # move straight on to the next model
                 except concurrent.futures.TimeoutError:
                     usage.record_error(model, "chat", "timeout")
                     log.warning("gemini %s gave no answer within %.0fs - switching model", model, wait_s)
                     self._cooldown[model] = time.time() + TIMEOUT_COOLDOWN_S
                     overloaded.append(f"{model} (no answer in {wait_s:.0f}s)")
+                    self._why[model] = f"no answer within {wait_s:.0f}s"
                     break
                 except Exception as e:  # noqa: BLE001  (timeouts, network)
                     log.warning("gemini %s failed after %.1fs: %r", model, time.time() - t0, e)
@@ -322,6 +345,9 @@ class Jarvis:
                         overloaded.append(f"{model} (too slow)")
                         break  # try the next model
                     raise RuntimeError(f"Couldn't reach Gemini: {e}") from e
+        if strict:
+            raise RuntimeError(f"Your chosen model {chosen} didn't answer ({self._why.get(chosen, 'error')}). "
+                               "Pick another model in Settings → Brain, or turn off 'Only use this model'.")
         if quota and not overloaded:
             raise RuntimeError(
                 "Your Gemini free-tier quota is used up for every model I can use (" + ", ".join(quota) + "). "
@@ -382,7 +408,7 @@ class Jarvis:
                 log.info("turn done in %.1fs, tools=%s", time.time() - t_start, used)
                 self._trim_history()
                 yield {"type": "reply", "text": reply, "tools": used, "model": self.last_model,
-                       "seconds": round(time.time() - t_start, 1)}
+                       "seconds": round(time.time() - t_start, 1), "note": self.fallback_note}
             except Exception as e:  # noqa: BLE001
                 # drop the dangling turn so the conversation stays valid
                 while self.history and not (self.history[-1].role == "user" and self.history[-1].parts
