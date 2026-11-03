@@ -86,8 +86,14 @@ dashboard opens in its own app window. Enter your access code once. Click the mi
   **`JARVIS-debug.bat`** to start him with a visible console.
 
 ### Updating to a new version
-Download the new ZIP and extract it **over** your JARVIS folder, replacing files. Your `.env`, `data` folder
-(projects, memory, Google sign-in) and installed packages are kept. If `requirements.txt` changed, run `install.bat` again.
+No reinstalling. JARVIS updates himself and keeps your `.env`, projects, memory and Google sign-in:
+
+- **In the app:** Settings → **Check for updates** → **Update & restart**. JARVIS also tells you when an update is
+  available.
+- **Or** double-click **`update.bat`** in the JARVIS folder.
+
+The very first time, `update.bat` installs **Git** (a free tool JARVIS uses to download only what changed) if you
+don't have it, then links your folder to GitHub. After that, updates take a few seconds.
 
 ## 5. Connect your Android phone
 
@@ -159,6 +165,7 @@ you, and voice live in the dashboard's **Settings** panel.
 | No sound on phone | Tap the screen once (browsers block audio until you interact), check media volume. |
 | Gemini 429 / quota errors | Free-tier limit reached; wait a minute or enable billing in AI Studio. TTS has the tightest limits — switch voice to *Microsoft neural en-GB* to save quota. |
 | Port 8765 in use | Change `PORT` in `.env`. |
+| “Git is not installed” when updating | Double-click `update.bat` once — it installs Git — then try again. |
 
 ## Project layout
 

@@ -246,6 +246,9 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .logbox { background: #02060b; border: 1px solid var(--line); border-radius: 10px; padding: 10px; font: 11.5px/1.45 var(--mono); max-height: 50dvh; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
 .drawer code { font-family: var(--mono); font-size: 12px; }
 
+.update-box { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.update-box ul { margin: 6px 0 0; padding-left: 18px; color: var(--text); font-size: 13px; }
+
 /* toasts */
 .toasts { position: fixed; z-index: 60; top: 76px; right: 20px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
 .toast { pointer-events: auto; background: var(--panel-solid); border: 1px solid var(--line-2); border-left: 3px solid var(--cyan); padding: 10px 14px; border-radius: 10px; max-width: 340px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); animation: rise .25s; font-size: 13px; }

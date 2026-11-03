@@ -25,6 +25,11 @@ _SECRET_FILE = config.DATA_DIR / "secret.key"
 if not _SECRET_FILE.exists():
     _SECRET_FILE.write_text(secrets.token_hex(32))
 _SECRET = _SECRET_FILE.read_text().strip().encode()
+# Local admin token: lets update.bat on this computer restart JARVIS without the access code.
+_ADMIN_FILE = config.DATA_DIR / "admin.token"
+if not _ADMIN_FILE.exists():
+    _ADMIN_FILE.write_text(secrets.token_hex(24))
+_ADMIN = _ADMIN_FILE.read_text().strip()
 COOKIE = "jarvis_auth"
 OPEN_PATHS = {"/api/login", "/api/session", "/api/health"}
 
@@ -35,6 +40,8 @@ def _token() -> str:
 
 def _authed(request: Request) -> bool:
     if not config.ACCESS_CODE:
+        return True
+    if request.url.path == "/api/shutdown" and hmac.compare_digest(request.headers.get("x-admin-token", ""), _ADMIN):
         return True
     tok = request.cookies.get(COOKIE) or request.headers.get("x-jarvis-token", "")
     return hmac.compare_digest(tok, _token())
@@ -110,6 +117,38 @@ def open_url(body: OpenURLBody, request: Request):
         raise HTTPException(400, "Not allowed")
     webbrowser.open(body.url)
     return {"ok": True}
+
+
+@app.get("/api/update/check")
+def update_check():
+    from . import updater
+
+    try:
+        return updater.check()
+    except updater.UpdateError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Update check failed: {e}") from e
+
+
+@app.post("/api/update/apply")
+def update_apply():
+    import run_jarvis
+
+    from . import updater
+
+    def restart():
+        updater.restart_detached()
+        run_jarvis.request_shutdown()
+
+    return updater.apply_in_background(restart)
+
+
+@app.get("/api/update/status")
+def update_status():
+    from . import updater
+
+    return updater.state
 
 
 @app.get("/api/logs")

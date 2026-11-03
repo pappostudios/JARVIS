@@ -48,6 +48,7 @@ function goOffline() {
 }
 function goOnline() {
   if (!state.offline) return;
+  if (state.updating) { location.reload(); return; }
   state.offline = false;
   clearInterval(offlineTimer);
   $("#offlineBar").classList.add("hidden");
@@ -806,6 +807,49 @@ document.addEventListener("click", (e) => {
   api("/api/open-url", { json: { url: a.href } }).catch(() => window.open(a.href, "_blank"));
 });
 
+/* ───────────────────────── updates ───────────────────────── */
+function showUpdate(info) {
+  const box = $("#updateInfo");
+  if (!info.available) {
+    box.innerHTML = `✓ JARVIS is up to date <span class="muted">(${esc(info.current || "")})</span>`;
+    $("#applyUpdateBtn").classList.add("hidden");
+    return;
+  }
+  box.innerHTML = `<strong style="color:var(--cyan)">A new version is available.</strong><ul>${info.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`;
+  $("#applyUpdateBtn").classList.remove("hidden");
+}
+$("#checkUpdateBtn").addEventListener("click", guard(async () => {
+  $("#updateInfo").textContent = "Checking GitHub for updates…";
+  try { showUpdate(await getJSON("/api/update/check")); }
+  catch (e) { $("#updateInfo").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}));
+$("#applyUpdateBtn").addEventListener("click", guard(async () => {
+  $("#applyUpdateBtn").disabled = true;
+  await postJSON("/api/update/apply");
+  state.updating = true;
+  const poll = async () => {
+    try {
+      const st = await (await fetch("/api/update/status", { cache: "no-store" })).json();
+      if (st.error) {
+        state.updating = false; $("#applyUpdateBtn").disabled = false;
+        $("#updateInfo").innerHTML = `<span class="err">Update failed: ${esc(st.error)}</span>`;
+        return;
+      }
+      $("#updateInfo").textContent = (st.step || "Updating") + "…";
+    } catch { goOffline(); $("#updateInfo").textContent = "Restarting JARVIS…"; return; }  // server restarting
+    setTimeout(poll, 1200);
+  };
+  poll();
+}));
+async function silentUpdateCheck() {
+  if (!isDesktop || state.updateChecked) return;
+  state.updateChecked = true;
+  try {
+    const info = await getJSON("/api/update/check");
+    if (info.available) toast("A JARVIS update is available — Settings → Update & restart.");
+  } catch {}
+}
+
 /* ───────────────────────── mobile tabs ───────────────────────── */
 function setTab(tab) {
   state.tab = tab;
@@ -834,6 +878,7 @@ async function boot() {
     addMessage("jarvis", `Good ${h < 12 ? "morning" : h < 18 ? "afternoon" : "evening"}. JARVIS online — how may I help? Tap the microphone, hold Space, or type.`);
   }
   await refresh();
+  setTimeout(silentUpdateCheck, 5000);
   if (!state.pollStarted) { state.pollStarted = true; setInterval(() => document.visibilityState === "visible" && !state.offline && refresh(), 60000); }
 }
 document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && refresh());

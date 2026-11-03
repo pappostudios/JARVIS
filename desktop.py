@@ -104,14 +104,24 @@ def open_window() -> None:
     webbrowser.open(URL)
 
 
+def wait_for_port_free(timeout: float = 30) -> None:
+    end = time.time() + timeout
+    while time.time() < end and run_jarvis.port_in_use():
+        time.sleep(0.4)
+
+
 def main() -> None:
     run_jarvis.banner()
+    show_window = "--no-window" not in sys.argv
+    if "--after-update" in sys.argv:
+        wait_for_port_free()  # let the old version finish shutting down
 
     # Already running? Just show the window.
     h = health()
     if h and h.get("app") == "jarvis":
         print("  JARVIS is already running - opening the window.")
-        open_window()
+        if show_window:
+            open_window()
         return
     if run_jarvis.port_in_use():
         alert(f"Port {config.PORT} is being used by another program.\n\n"
@@ -124,7 +134,8 @@ def main() -> None:
         alert("JARVIS could not start.\n\nLast lines of data\\jarvis.log:\n\n" + logsetup.tail(15)[-1500:])
         sys.exit(1)
 
-    open_window()
+    if show_window:
+        open_window()
     print("  JARVIS is online. Shut him down from Settings -> 'Shut down JARVIS' (or press Ctrl+C here).\n")
     try:
         while server_thread.is_alive():
