@@ -1,6 +1,7 @@
 """The JARVIS brain: Gemini + function calling loop with conversation memory."""
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Any, Iterator
@@ -10,7 +11,18 @@ from google.genai import errors, types
 
 from . import config, db, projects, tools
 
+log = logging.getLogger("jarvis.agent")
+
 MAX_TOOL_ROUNDS = 10
+REQUEST_TIMEOUT_MS = 75_000
+
+# "Thinking" = how long Gemini reasons before answering. Newer models use levels, older ones a token budget.
+_THINKING = {
+    "fast": [types.ThinkingConfig(thinking_level="LOW"), types.ThinkingConfig(thinking_budget=0),
+             types.ThinkingConfig(thinking_budget=512)],
+    "balanced": [types.ThinkingConfig(thinking_level="MEDIUM"), types.ThinkingConfig(thinking_budget=2048)],
+    "deep": [types.ThinkingConfig(thinking_level="HIGH"), types.ThinkingConfig(thinking_budget=-1)],
+}
 MAX_HISTORY_CONTENTS = 40
 FALLBACK_MODELS = ["gemini-flash-latest", "gemini-2.5-flash"]
 
@@ -90,6 +102,7 @@ class Jarvis:
         self.model = config.GEMINI_MODEL
         self.history: list[types.Content] = []
         self._decls: list[types.FunctionDeclaration] | None = None
+        self._thinking_ok: dict[tuple[str, str], int] = {}
         self._restore_history()
 
     # ── setup ──
@@ -97,7 +110,13 @@ class Jarvis:
         if self.client is None:
             if not config.GEMINI_API_KEY:
                 raise RuntimeError("GEMINI_API_KEY is missing. Add it to the .env file and restart JARVIS.")
-            self.client = genai.Client(api_key=config.GEMINI_API_KEY)
+            self.client = genai.Client(
+                api_key=config.GEMINI_API_KEY,
+                http_options=types.HttpOptions(
+                    timeout=REQUEST_TIMEOUT_MS,
+                    retry_options=types.HttpRetryOptions(attempts=2, initial_delay=1.0, max_delay=4.0),
+                ),
+            )
         return self.client
 
     def _declarations(self) -> list[types.FunctionDeclaration]:
@@ -138,28 +157,49 @@ class Jarvis:
         client = self._ensure_client()
         models = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
         last_err: Exception | None = None
+        level = db.get_setting("thinking") or "fast"
         for model in models:
-            for attempt in range(3):
+            thinking: list[types.ThinkingConfig | None] = list(_THINKING.get(level, _THINKING["fast"])) + [None]
+            t_idx, attempt = self._thinking_ok.get((model, level), 0), 0
+            while t_idx < len(thinking):
+                config_.thinking_config = thinking[t_idx]
+                t0 = time.time()
                 try:
                     resp = client.models.generate_content(model=model, contents=self.history, config=config_)
+                    log.info("gemini %s ok in %.1fs (thinking=%s)", model, time.time() - t0,
+                             thinking[t_idx].model_dump(exclude_none=True) if thinking[t_idx] else "default")
+                    self._thinking_ok[(model, level)] = t_idx  # remember the form this model accepts
                     if model != self.model:
-                        print(f"[jarvis] model '{self.model}' unavailable, switched to '{model}'")
+                        log.warning("model '%s' unavailable, switched to '%s'", self.model, model)
                         self.model = model
                     return resp
                 except errors.ClientError as e:
                     last_err = e
-                    if e.code == 404:
-                        break  # try next model
-                    if e.code == 429 and attempt < 2:
-                        time.sleep(3 * (attempt + 1))
+                    log.warning("gemini %s error %s after %.1fs: %s", model, e.code, time.time() - t0, str(e)[:300])
+                    if e.code == 400 and "think" in str(e).lower():
+                        t_idx += 1  # this model doesn't accept that thinking setting; try the next form
                         continue
+                    if e.code == 404:
+                        break  # model not available to this key: try the next model
+                    if e.code == 429:
+                        raise RuntimeError(
+                            "Gemini says the usage limit was reached (429). On the free tier wait a minute and try "
+                            "again, or enable billing for your key at aistudio.google.com.") from e
                     raise
                 except errors.ServerError as e:
                     last_err = e
+                    log.warning("gemini %s server error %s: %s", model, e.code, str(e)[:200])
+                    attempt += 1
                     if attempt < 2:
-                        time.sleep(2 * (attempt + 1))
+                        time.sleep(1.5)
                         continue
-                    raise
+                    raise RuntimeError("Gemini is temporarily overloaded. Please try again in a moment.") from e
+                except Exception as e:  # noqa: BLE001  (timeouts, network)
+                    log.warning("gemini %s failed after %.1fs: %r", model, time.time() - t0, e)
+                    if "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower():
+                        raise RuntimeError("Gemini took too long to answer. Please try again "
+                                           "(if this keeps happening, set Settings → Response speed to Fast).") from e
+                    raise RuntimeError(f"Couldn't reach Gemini: {e}") from e
         raise last_err or RuntimeError("No Gemini model available")
 
     # ── main entry ──
@@ -177,6 +217,7 @@ class Jarvis:
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                     temperature=0.6,
                 )
+                t_start = time.time()
                 reply = ""
                 for _ in range(MAX_TOOL_ROUNDS):
                     yield {"type": "status", "text": "Thinking"}
@@ -202,6 +243,7 @@ class Jarvis:
                 if not reply:
                     reply = "Done."
                 db.log_message("jarvis", reply)
+                log.info("turn done in %.1fs, tools=%s", time.time() - t_start, used)
                 self._trim_history()
                 yield {"type": "reply", "text": reply, "tools": used}
             except Exception as e:  # noqa: BLE001
@@ -211,6 +253,7 @@ class Jarvis:
                     self.history.pop()
                 if self.history:
                     self.history.pop()
+                log.exception("chat turn failed")
                 msg = str(e)
                 if "API key" in msg or "API_KEY" in msg:
                     msg = "Gemini rejected the API key. Check GEMINI_API_KEY in the .env file."

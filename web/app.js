@@ -20,7 +20,10 @@ async function api(path, opts = {}) {
   }
   let r;
   try { r = await fetch(path, init); }
-  catch { goOffline(); throw new Error("Can't reach the JARVIS server. Make sure JARVIS is running on your computer."); }
+  catch (e) {
+    if (init.signal?.aborted) throw e;
+    goOffline(); throw new Error("Can't reach the JARVIS server. Make sure JARVIS is running on your computer.");
+  }
   if (state.offline) goOnline();
   if (r.status === 401) { showLogin(); throw new Error("Not authenticated"); }
   if (!r.ok) {
@@ -423,6 +426,7 @@ const chatEl = $("#chat");
 function addMessage(role, text, extra = {}) {
   const el = document.createElement("div");
   el.className = `msg ${role}${extra.error ? " error" : ""}`;
+  el.dir = "auto";
   el.innerHTML = renderMarkdown(text);
   if (role === "jarvis" && !extra.error) {
     const rp = document.createElement("button");
@@ -449,9 +453,16 @@ async function send(text) {
   const typing = document.createElement("div"); typing.className = "typing"; typing.textContent = "Processing";
   chatEl.appendChild(typing); chatEl.scrollTop = chatEl.scrollHeight;
   core.set("thinking");
-  let reply = null;
+  let reply = null, statusText = "Thinking";
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    const sec = Math.round((Date.now() - t0) / 1000);
+    typing.textContent = sec >= 3 ? `${statusText} · ${sec}s` : statusText;
+  }, 500);
+  const abort = new AbortController();
+  const killer = setTimeout(() => abort.abort(), 180000);
   try {
-    const r = await api("/api/chat", { json: { text } });
+    const r = await api("/api/chat", { json: { text }, signal: abort.signal });
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "";
     for (;;) {
@@ -463,12 +474,13 @@ async function send(text) {
         const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 2);
         if (!line.startsWith("data:")) continue;
         const ev = JSON.parse(line.slice(5));
-        if (ev.type === "status") { typing.textContent = ev.text; core.set("thinking", ev.text); }
+        if (ev.type === "status") { statusText = ev.text; core.set("thinking", ev.text); }
         else if (ev.type === "reply") { reply = ev; }
         else if (ev.type === "error") { reply = { error: true, text: ev.text }; }
       }
     }
-  } catch (e) { reply = { error: true, text: e.message }; }
+  } catch (e) { reply = { error: true, text: abort.signal.aborted ? "That took far too long, so I stopped waiting. Please try again." : e.message }; }
+  clearInterval(timer); clearTimeout(killer);
   typing.remove();
   state.busy = false; $("#sendBtn").disabled = false;
   if (!reply) reply = { error: true, text: "Connection lost." };
@@ -502,8 +514,8 @@ function renderAgenda(list, el, compact = false) {
     const cls = s ? (e < now ? "past" : s <= now ? "now" : "") : "";
     const time = s ? `${fmtTime(s)}<small>${fmtTime(e)}</small>` : "ALL<small>DAY</small>";
     const meta = [ev.location, ev.attendees?.length ? `${ev.attendees.length} attendee${ev.attendees.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
-    return `<li class="${cls}"><span class="t">${time}</span><div><div class="what">${esc(ev.title)}</div>
-      ${meta ? `<div class="meta">${esc(meta)}</div>` : ""}${ev.meet_link && !compact ? `<a href="${esc(ev.meet_link)}" target="_blank" rel="noopener">Join Meet ↗</a>` : ""}</div></li>`;
+    return `<li class="${cls}"><span class="t">${time}</span><div><div class="what" dir="auto">${esc(ev.title)}</div>
+      ${meta ? `<div class="meta" dir="auto">${esc(meta)}</div>` : ""}${ev.meet_link && !compact ? `<a href="${esc(ev.meet_link)}" target="_blank" rel="noopener">Join Meet ↗</a>` : ""}</div></li>`;
   }).join("");
 }
 
@@ -514,7 +526,7 @@ function renderNextUp(events) {
   if (!next) { el.classList.add("hidden"); return; }
   const mins = Math.round((next.s - now) / 6e4);
   const when = mins <= 0 ? "In progress" : mins < 60 ? `In ${mins} min` : `At ${fmtTime(next.s)}`;
-  el.innerHTML = `<div class="lbl">Next · ${when}</div><div class="ttl">${esc(next.ev.title)}</div>`;
+  el.innerHTML = `<div class="lbl">Next · ${when}</div><div class="ttl" dir="auto">${esc(next.ev.title)}</div>`;
   el.classList.remove("hidden");
 }
 
@@ -535,8 +547,8 @@ function renderInbox(gd) {
     const d = new Date(m.date); const isToday = d.toDateString() === new Date().toDateString();
     const when = isNaN(d) ? "" : isToday ? fmtTime(d) : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
     return `<li data-id="${esc(m.id)}" data-from="${esc(from)}" data-subject="${esc(m.subject)}">
-      <div class="from"><span>${esc(from)}</span><time>${when}</time></div>
-      <div class="subj">${esc(m.subject)}</div><div class="snip">${esc(m.snippet)}</div></li>`;
+      <div class="from"><span dir="auto">${esc(from)}</span><time>${when}</time></div>
+      <div class="subj" dir="auto">${esc(m.subject)}</div><div class="snip" dir="auto">${esc(m.snippet)}</div></li>`;
   }).join("");
   $$("#inbox li[data-id]").forEach((li) => li.addEventListener("click", () => {
     setTab("assistant");
@@ -586,7 +598,7 @@ function renderTasks(list) {
     const meta = [t.project && esc(t.project), t.due_date && `<span class="${overdue ? "overdue" : ""}">${overdue ? "overdue · " : ""}${t.due_date === today ? "today" : fmtDay(t.due_date)}</span>`,
       t.priority !== "medium" && `<span class="prio ${t.priority}">${t.priority}</span>`, t.status === "in_progress" && "in progress"].filter(Boolean).join(" ");
     return `<li class="${t.status === "done" ? "done" : ""}" data-id="${t.id}"><button class="check" aria-label="Toggle done"></button>
-      <div><div class="tt">${esc(t.title)}</div>${meta ? `<div class="tm">${meta}</div>` : ""}</div><button class="del" aria-label="Delete">✕</button></li>`;
+      <div><div class="tt" dir="auto">${esc(t.title)}</div>${meta ? `<div class="tm">${meta}</div>` : ""}</div><button class="del" aria-label="Delete">✕</button></li>`;
   }).join("");
   $$("#tasks li[data-id]").forEach((li) => {
     $(".check", li).onclick = async () => { li.classList.toggle("done"); await postJSON(`/api/tasks/${li.dataset.id}/toggle`); setTimeout(() => refresh(), 600); };
@@ -696,7 +708,7 @@ function checkReminders() {
 setInterval(checkReminders, 30000);
 
 /* ───────────────────────── settings ───────────────────────── */
-const SETTING_FIELDS = ["user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
+const SETTING_FIELDS = ["thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
 
 async function openSettings() {
   $("#settings").classList.remove("hidden");

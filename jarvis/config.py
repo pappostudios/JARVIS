@@ -63,5 +63,6 @@ DEFAULT_SETTINGS = {
     "work_start": "09:00",
     "work_end": "18:00",
     "require_confirmation": "true",  # ask before sending email / inviting people / deleting events
+    "thinking": "fast",           # fast | balanced | deep — how long Gemini reasons before answering
     "about_me": "",               # free text: role, company, preferences
 }
