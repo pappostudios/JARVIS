@@ -24,7 +24,9 @@ _THINKING = {
     "deep": [types.ThinkingConfig(thinking_level="HIGH"), types.ThinkingConfig(thinking_budget=-1)],
 }
 MAX_HISTORY_CONTENTS = 40
-FALLBACK_MODELS = ["gemini-flash-latest", "gemini-2.5-flash"]
+# Tried in order when the main model is overloaded (5xx) or unavailable to the key (404).
+FALLBACK_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"]
+OVERLOAD_COOLDOWN_S = 300  # skip an overloaded model for 5 minutes instead of waiting on it every turn
 
 PERSONA = """You are J.A.R.V.I.S. — "Just A Rather Very Intelligent System" — a refined British AI personal
 assistant and chief of staff. You speak like a well-educated Englishman: composed, warm, quietly witty, impeccably
@@ -103,6 +105,7 @@ class Jarvis:
         self.history: list[types.Content] = []
         self._decls: list[types.FunctionDeclaration] | None = None
         self._thinking_ok: dict[tuple[str, str], int] = {}
+        self._cooldown: dict[str, float] = {}
         self._restore_history()
 
     # ── setup ──
@@ -122,10 +125,13 @@ class Jarvis:
     def _declarations(self) -> list[types.FunctionDeclaration]:
         if self._decls is None:
             client = self._ensure_client()
-            self._decls = [
-                types.FunctionDeclaration.from_callable(client=client._api_client, callable=f, use_json_schema=True)
-                for f in tools.TOOL_FUNCS
-            ]
+            decls = []
+            for f in tools.TOOL_FUNCS:
+                d = types.FunctionDeclaration.from_callable(client=client._api_client, callable=f, use_json_schema=True)
+                d.response_json_schema = None  # optional; keep requests minimal
+                d.response = None
+                decls.append(d)
+            self._decls = decls
         return self._decls
 
     def _restore_history(self) -> None:
@@ -155,12 +161,15 @@ class Jarvis:
 
     def _generate(self, config_: types.GenerateContentConfig) -> types.GenerateContentResponse:
         client = self._ensure_client()
-        models = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
+        ordered = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
+        now = time.time()
+        models = [m for m in ordered if self._cooldown.get(m, 0) < now] or ordered
         last_err: Exception | None = None
+        overloaded: list[str] = []
         level = db.get_setting("thinking") or "fast"
         for model in models:
             thinking: list[types.ThinkingConfig | None] = list(_THINKING.get(level, _THINKING["fast"])) + [None]
-            t_idx, attempt = self._thinking_ok.get((model, level), 0), 0
+            t_idx = self._thinking_ok.get((model, level), 0)
             while t_idx < len(thinking):
                 config_.thinking_config = thinking[t_idx]
                 t0 = time.time()
@@ -169,7 +178,7 @@ class Jarvis:
                     log.info("gemini %s ok in %.1fs (thinking=%s)", model, time.time() - t0,
                              thinking[t_idx].model_dump(exclude_none=True) if thinking[t_idx] else "default")
                     self._thinking_ok[(model, level)] = t_idx  # remember the form this model accepts
-                    if model != self.model:
+                    if model != self.model and not overloaded:
                         log.warning("model '%s' unavailable, switched to '%s'", self.model, model)
                         self.model = model
                     return resp
@@ -188,18 +197,19 @@ class Jarvis:
                     raise
                 except errors.ServerError as e:
                     last_err = e
-                    log.warning("gemini %s server error %s: %s", model, e.code, str(e)[:200])
-                    attempt += 1
-                    if attempt < 2:
-                        time.sleep(1.5)
-                        continue
-                    raise RuntimeError("Gemini is temporarily overloaded. Please try again in a moment.") from e
+                    log.warning("gemini %s server error %s after %.1fs: %s", model, e.code, time.time() - t0, str(e)[:300])
+                    self._cooldown[model] = time.time() + OVERLOAD_COOLDOWN_S
+                    overloaded.append(f"{model} ({e.code})")
+                    break  # move straight on to the next model
                 except Exception as e:  # noqa: BLE001  (timeouts, network)
                     log.warning("gemini %s failed after %.1fs: %r", model, time.time() - t0, e)
                     if "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower():
                         raise RuntimeError("Gemini took too long to answer. Please try again "
                                            "(if this keeps happening, set Settings → Response speed to Fast).") from e
                     raise RuntimeError(f"Couldn't reach Gemini: {e}") from e
+        if overloaded:
+            raise RuntimeError("Google's Gemini servers are overloaded right now — every model I tried failed: "
+                               + ", ".join(overloaded) + ". Please try again in a minute.")
         raise last_err or RuntimeError("No Gemini model available")
 
     # ── main entry ──
