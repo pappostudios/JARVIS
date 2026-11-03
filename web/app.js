@@ -963,8 +963,9 @@ $("#usageBtn").addEventListener("click", guard(async () => {
     <section><h3>Models used today</h3>
       <table class="usage-table"><tr><th>Model</th><th>Requests</th><th>Refused</th><th>Tokens</th></tr>${models}</table></section>
     <section><h3>If you upgraded to the paid tier</h3>
+      <p class="muted" style="margin:0;font-size:12px"><strong>Typed &amp; voice messages</strong> — estimated from your real token use, as if all of it ran on Gemini 3.8 Flash (the priciest Flash). Flash-Lite would cost several times less.</p>
       <table class="usage-table"><tr><th>Priced as</th><th>Last 14 days</th><th>Per month</th></tr>${est}</table>
-      <p class="muted" style="margin:0;font-size:12px">Estimate from your real token use, as if all of it ran on Gemini 3.8 Flash (the priciest Flash). Flash-Lite would cost several times less. Live calls are billed by audio and aren't included.</p></section>
+      <p class="muted" style="margin:0;font-size:12px"><strong>Live calls</strong> — ${u.live.minutes} min in the last 14 days${u.live.models.length ? ` on ${esc(u.live.models.join(", "))}` : ""}. Live is billed by audio at the Live model's own prices, so check its price page (same page as your screenshot, under the Live model) and multiply by your minutes.</p></section>
     <section><h3>Google's own view</h3>
       <p class="muted" style="margin:0;font-size:12.5px">Exact free-tier limits and remaining quota per model: <a data-ext target="_blank" rel="noopener" href="https://aistudio.google.com/rate-limit" style="color:var(--cyan)">ai.dev/rate-limit</a></p></section>`, true);
   $("#projectForm").onsubmit = (e) => e.preventDefault();

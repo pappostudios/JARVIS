@@ -117,27 +117,34 @@ def summary(days: int = 14) -> dict:
                           key=lambda m: -m["requests"])
 
     active = [d for d in per_day.values() if d["requests"]]
-    tot_in = sum(d["input_tokens"] for d in active)
-    tot_out = sum(d["output_tokens"] for d in active)
-    tot_cached = sum(d["cached_tokens"] for d in active)
+    # Text-model tokens only: Live calls are billed by audio at the Live model's own prices.
+    text_rows = [r for r in rows if r["kind"] != "live"]
+    tot_in = sum(r["input_tokens"] for r in text_rows)
+    tot_out = sum(r["output_tokens"] for r in text_rows)
+    tot_cached = sum(r["cached_tokens"] for r in text_rows)
+    live_rows = [r for r in rows if r["kind"] == "live"]
+    live = {"minutes": round(sum(r["seconds"] for r in live_rows) / 60, 1),
+            "tokens": sum(r["input_tokens"] + r["output_tokens"] for r in live_rows),
+            "models": sorted({r["model"] for r in live_rows})}
     avg_factor = 30 / max(len(active), 1)
     estimates = [{"label": label, "per_month": round(_cost(tot_in, tot_out, tot_cached, price) * avg_factor, 2),
                   "so_far": round(_cost(tot_in, tot_out, tot_cached, price), 3)}
                  for label, price in PAID_PRICES.items()]
 
     quota_days = sum(1 for d in active if d["quota_errors"])
+    n_days = f"{len(active)} day" + ("" if len(active) == 1 else "s")
     t = per_day[today.isoformat()]
     if not active:
         verdict = "No usage recorded yet — use JARVIS normally for a few days, then check back."
     elif quota_days == 0:
-        verdict = (f"The free tier is enough so far: no quota refusals in {len(active)} day(s) of use. "
+        verdict = (f"The free tier is enough so far: no quota refusals in {n_days} of use. "
                    "Upgrade only if you want the privacy of the paid tier.")
     elif quota_days <= max(1, len(active) // 4):
-        verdict = (f"You hit a free-tier limit on {quota_days} of {len(active)} day(s). JARVIS switched models to "
+        verdict = (f"You hit a free-tier limit on {quota_days} of {n_days}. JARVIS switched models to "
                    "cope; upgrading would remove these interruptions.")
     else:
-        verdict = (f"You hit free-tier limits on {quota_days} of {len(active)} day(s) — upgrading to the paid tier "
+        verdict = (f"You hit free-tier limits on {quota_days} of {n_days} — upgrading to the paid tier "
                    "is recommended for reliable use.")
     return {"days": list(per_day.values()), "today": t, "models_today": models_today,
-            "estimates": estimates, "active_days": len(active), "quota_days": quota_days, "verdict": verdict,
+            "estimates": estimates, "live": live, "active_days": len(active), "quota_days": quota_days, "verdict": verdict,
             "kinds": KIND_LABELS}
