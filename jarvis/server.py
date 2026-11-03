@@ -151,6 +151,13 @@ def update_status():
     return updater.state
 
 
+@app.post("/api/diagnose/gemini")
+def diagnose_gemini():
+    from . import diagnose
+
+    return diagnose.run()
+
+
 @app.get("/api/logs")
 def logs():
     return {"log": logsetup.tail(200), "path": str(logsetup.LOG_FILE)}

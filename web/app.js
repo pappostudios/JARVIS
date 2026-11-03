@@ -774,11 +774,28 @@ $("#shutdownBtn").addEventListener("click", guard(async () => {
 }));
 $("#logsBtn").addEventListener("click", guard(async () => {
   const { log, path } = await getJSON("/api/logs");
-  openModal("Diagnostics", `<p class="muted" style="margin:0">Log file: <code>${esc(path)}</code></p>
-    <pre class="logbox">${esc(log)}</pre>
-    <button type="button" class="btn" id="copyLog">Copy log</button>`);
+  openModal("Diagnostics", `
+    <section><h3>Gemini connection test</h3>
+      <p class="muted" style="margin:0">Checks your network, API key and each model, with timings. Takes up to 2 minutes.</p>
+      <button type="button" class="btn primary" id="testGemini">Test Gemini</button>
+      <div id="testResults"></div></section>
+    <section><h3>Log</h3>
+      <p class="muted" style="margin:0">File: <code>${esc(path)}</code></p>
+      <pre class="logbox">${esc(log)}</pre>
+      <button type="button" class="btn" id="copyLog">Copy log</button></section>`);
   $("#projectForm").onsubmit = (e) => e.preventDefault();
   $("#copyLog").onclick = () => navigator.clipboard?.writeText(log).then(() => toast("Log copied."));
+  $("#testGemini").onclick = guard(async () => {
+    const btn = $("#testGemini"); btn.disabled = true; btn.textContent = "Testing… (up to 2 minutes)";
+    try {
+      const r = await postJSON("/api/diagnose/gemini");
+      const text = r.steps.map((x) => `${x.ok ? "✓" : "✗"} ${x.step} — ${x.seconds}s — ${x.detail}`).join("\n");
+      $("#testResults").innerHTML = `<table class="diag">${r.steps.map((x) => `<tr class="${x.ok ? "ok" : "bad"}">
+        <td>${x.ok ? "✓" : "✗"}</td><td>${esc(x.step)}<div class="muted">${esc(x.detail)}</div></td><td>${x.seconds}s</td></tr>`).join("")}</table>
+        <button type="button" class="btn" id="copyTest">Copy results</button>`;
+      $("#copyTest").onclick = () => navigator.clipboard?.writeText(text).then(() => toast("Results copied."));
+    } finally { btn.disabled = false; btn.textContent = "Test Gemini"; }
+  });
 }));
 $("#notifBtn").addEventListener("click", async () => {
   if (!("Notification" in window)) return toast("Notifications not supported here.", "warn");

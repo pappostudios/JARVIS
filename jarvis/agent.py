@@ -1,6 +1,7 @@
 """The JARVIS brain: Gemini + function calling loop with conversation memory."""
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import threading
 import time
@@ -17,6 +18,10 @@ MAX_TOOL_ROUNDS = 10
 REQUEST_TIMEOUT_MS = 90_000
 # How long to wait for the FIRST model before switching to a backup (per response-speed setting).
 FIRST_TRY_TIMEOUT_S = {"fast": 20, "balanced": 40, "deep": 90}
+BACKUP_TIMEOUT_S = 25
+TURN_BUDGET_S = {"fast": 60, "balanced": 90, "deep": 150}  # hard cap on waiting for one answer
+# Gemini calls run in worker threads so JARVIS can enforce deadlines himself, even if a connection hangs.
+_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="gemini")
 
 # "Thinking" = how long Gemini reasons before answering. Newer models use levels, older ones a token budget.
 _THINKING = {
@@ -226,17 +231,25 @@ class Jarvis:
         last_err: Exception | None = None
         overloaded: list[str] = []
         level = db.get_setting("thinking") or "fast"
+        started = time.time()
+        budget = TURN_BUDGET_S.get(level, 60)
         for i, model in enumerate(models):
             thinking: list[types.ThinkingConfig | None] = list(_THINKING.get(level, _THINKING["fast"])) + [None]
             t_idx = self._thinking_ok.get((model, level), 0)
-            wait_s = FIRST_TRY_TIMEOUT_S.get(level, 20) if i == 0 else 60
-            config_.http_options = types.HttpOptions(timeout=wait_s * 1000,
-                                                     retry_options=types.HttpRetryOptions(attempts=1))
+            remaining = budget - (time.time() - started)
+            if remaining < 3:
+                break
+            wait_s = min(FIRST_TRY_TIMEOUT_S.get(level, 20) if i == 0 else BACKUP_TIMEOUT_S, remaining)
             while t_idx < len(thinking):
-                config_.thinking_config = thinking[t_idx]
+                cfg = config_.model_copy()
+                cfg.thinking_config = thinking[t_idx]
+                cfg.http_options = types.HttpOptions(timeout=int(wait_s * 1000) + 2000,
+                                                     retry_options=types.HttpRetryOptions(attempts=1))
                 t0 = time.time()
                 try:
-                    resp = client.models.generate_content(model=model, contents=self.history, config=config_)
+                    fut = _POOL.submit(client.models.generate_content, model=model,
+                                       contents=list(self.history), config=cfg)
+                    resp = fut.result(timeout=wait_s)  # hard deadline enforced by JARVIS
                     log.info("gemini %s ok in %.1fs (thinking=%s)", model, time.time() - t0,
                              thinking[t_idx].model_dump(exclude_none=True) if thinking[t_idx] else "default")
                     self._thinking_ok[(model, level)] = t_idx  # remember the form this model accepts
@@ -263,6 +276,11 @@ class Jarvis:
                     self._cooldown[model] = time.time() + (TIMEOUT_COOLDOWN_S if slow else OVERLOAD_COOLDOWN_S)
                     overloaded.append(f"{model} ({'too slow' if slow else e.code})")
                     break  # move straight on to the next model
+                except concurrent.futures.TimeoutError:
+                    log.warning("gemini %s gave no answer within %.0fs - switching model", model, wait_s)
+                    self._cooldown[model] = time.time() + TIMEOUT_COOLDOWN_S
+                    overloaded.append(f"{model} (no answer in {wait_s:.0f}s)")
+                    break
                 except Exception as e:  # noqa: BLE001  (timeouts, network)
                     log.warning("gemini %s failed after %.1fs: %r", model, time.time() - t0, e)
                     if "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower():
@@ -271,9 +289,18 @@ class Jarvis:
                         break  # try the next model
                     raise RuntimeError(f"Couldn't reach Gemini: {e}") from e
         if overloaded:
-            raise RuntimeError("Google's Gemini servers are overloaded right now — every model I tried failed: "
-                               + ", ".join(overloaded) + ". Please try again in a minute.")
+            raise RuntimeError("I couldn't get an answer from Gemini — " + "; ".join(overloaded) +
+                               ". Please run Settings → Diagnostics → Test Gemini so we can see why.")
         raise last_err or RuntimeError("No Gemini model available")
+
+    def build_config(self) -> types.GenerateContentConfig:
+        return types.GenerateContentConfig(
+            system_instruction=_system_prompt(),
+            tools=[types.Tool(function_declarations=self._declarations())],
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            # No temperature override: Gemini 3 models are tuned for the default (1.0) and can loop
+            # or stall when it's lowered.
+        )
 
     # ── main entry ──
     def chat(self, user_text: str) -> Iterator[dict[str, Any]]:
@@ -284,13 +311,7 @@ class Jarvis:
             self.history.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
             used: list[str] = []
             try:
-                cfg = types.GenerateContentConfig(
-                    system_instruction=_system_prompt(),
-                    tools=[types.Tool(function_declarations=self._declarations())],
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                    # No temperature override: Gemini 3 models are tuned for the default (1.0) and can loop
-                    # or stall when it's lowered.
-                )
+                cfg = self.build_config()
                 t_start = time.time()
                 reply = ""
                 for _ in range(MAX_TOOL_ROUNDS):
