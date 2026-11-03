@@ -265,7 +265,8 @@ def _google_overview() -> dict:
         tmr = today + timedelta(days=1)
         out["tomorrow"] = g.list_events(start_date=tmr.isoformat(), end_date=tmr.isoformat(), max_results=10)
         out["emails"] = g.list_emails("in:inbox is:unread", max_results=8)
-        out["unread"] = g.unread_count()
+        out["unread_by_account"] = g.unread_by_account()
+        out["unread"] = sum(out["unread_by_account"].values())
         out["accounts"] = g.accounts()
         out["connected"] = True
     except g.GoogleNotConnected as e:
@@ -293,6 +294,17 @@ def overview(refresh: bool = False):
         "settings": db.get_settings(),
         "model": jarvis.model,
     }
+
+
+@app.get("/api/inbox")
+def inbox(account: str):
+    """Unread inbox of one account (dashboard switch). Uses Gmail only — no Gemini."""
+    try:
+        email = g._resolve(account)
+        return {"account": email, "emails": g.list_emails("in:inbox is:unread", max_results=10, account=email),
+                "unread": g.unread_by_account().get(email, 0)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e)) from e
 
 
 # ── quick edits from the dashboard (no AI round-trip) ─────────

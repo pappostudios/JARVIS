@@ -947,6 +947,17 @@ def archive_emails(message_ids: list[str]) -> dict:
     return {"archived": len(message_ids)}
 
 
+def unread_by_account() -> dict[str, int]:
+    out: dict[str, int] = {}
+    for email in _targets(None):
+        try:
+            r = _svc("gmail", "v1", email).users().labels().get(userId="me", id="INBOX").execute()
+            out[email] = int(r.get("messagesUnread", 0))
+        except Exception:  # noqa: BLE001
+            out[email] = 0
+    return out
+
+
 def unread_count() -> int:
     total = 0
     for email in _targets(None):

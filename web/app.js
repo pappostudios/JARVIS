@@ -718,13 +718,41 @@ function googleMissing(el, msg) {
   el.innerHTML = `<li class="empty">${esc(msg || "Google not connected.")}<br><button class="mini" style="margin-top:8px" onclick="openSettings()">Connect Google</button></li>`;
 }
 
+/* Inbox switch: All / each connected account (only shown with 2+ accounts). Uses Gmail only — no Gemini. */
+try { state.inboxAccount = localStorage.getItem("jarvis.inboxAccount") || ""; } catch {}
 function renderInbox(gd) {
+  const accs = gd.accounts || [];
+  const total = gd.unread || 0;
+  $("#statUnread").textContent = total;
+  const badge = $("#inboxBadge"); badge.textContent = total > 99 ? "99+" : total; badge.classList.toggle("hidden", !total);
+  const tabs = $("#inboxTabs");
+  if (!gd.connected || accs.length < 2) {
+    tabs.classList.add("hidden"); state.inboxAccount = "";
+    return renderInboxList(gd);
+  }
+  if (state.inboxAccount && !accs.some((a) => a.email === state.inboxAccount)) state.inboxAccount = "";
+  const by = gd.unread_by_account || {};
+  const short = (a) => a.label || a.email.split("@")[0];
+  tabs.innerHTML = `<button data-acc="" class="${state.inboxAccount ? "" : "on"}">All<i>${total}</i></button>` +
+    accs.map((a) => `<button data-acc="${esc(a.email)}" title="${esc(a.email)}" class="${state.inboxAccount === a.email ? "on" : ""}">${esc(short(a))}<i>${by[a.email] ?? 0}</i></button>`).join("");
+  tabs.classList.remove("hidden");
+  $$("#inboxTabs button").forEach((b) => (b.onclick = () => {
+    state.inboxAccount = b.dataset.acc;
+    try { localStorage.setItem("jarvis.inboxAccount", state.inboxAccount); } catch {}
+    renderInbox(gd);
+  }));
+  if (!state.inboxAccount) return renderInboxList(gd);
+  const acc = state.inboxAccount;
+  $("#inbox").innerHTML = `<li class="empty">Loading ${esc(short(accs.find((a) => a.email === acc)))} inbox…</li>`;
+  getJSON(`/api/inbox?account=${encodeURIComponent(acc)}`)
+    .then((r) => { if (state.inboxAccount === acc) renderInboxList({ connected: true, emails: r.emails.map((m) => ({ ...m, account: null })), unread: r.unread }); })
+    .catch((e) => { $("#inbox").innerHTML = `<li class="empty">${esc(e.message)}</li>`; });
+}
+
+function renderInboxList(gd) {
   const el = $("#inbox");
   if (!gd.connected) return googleMissing(el, "Connect Google to see your inbox.");
-  const n = gd.unread || 0;
-  $("#unreadTag").textContent = `${n} unread`;
-  $("#statUnread").textContent = n;
-  const badge = $("#inboxBadge"); badge.textContent = n > 99 ? "99+" : n; badge.classList.toggle("hidden", !n);
+  $("#unreadTag").textContent = `${gd.unread || 0} unread`;
   if (!gd.emails?.length) { el.innerHTML = `<li class="empty">Inbox zero. Splendid.</li>`; return; }
   el.innerHTML = gd.emails.filter((m) => m.id).map((m) => {
     const from = (m.from.match(/^"?([^"<]+)"?\s*</) || [, m.from])[1].trim();
