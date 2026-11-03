@@ -9,6 +9,7 @@ const state = {
 };
 try { state.notified = new Set(JSON.parse(localStorage.getItem("jarvis.notified") || "[]")); } catch {}
 try { state.convMode = localStorage.getItem("jarvis.conv") === "1"; } catch {}
+try { state.taskFilter = localStorage.getItem("jarvis.taskFilter") || ""; } catch {}
 
 /* ───────────────────────── API ───────────────────────── */
 async function api(path, opts = {}) {
@@ -737,31 +738,109 @@ function renderApprovals(list) {
 
 function renderProjects(list) {
   const el = $("#projects");
-  const sel = $("#taskProject"), cur = sel.value;
-  sel.innerHTML = `<option value="">No project</option>` + list.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
-  sel.value = cur;
+  const sel = $("#taskProject");
+  sel.innerHTML = `<option value="">All projects</option><option value="priority">⚡ Priority order</option>` +
+    list.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("") + `<option value="none">No project</option>`;
+  const special = ["", "none", "priority"];
+  if (!special.includes(state.taskFilter || "") && !list.some((p) => String(p.id) === state.taskFilter)) state.taskFilter = "";
+  sel.value = state.taskFilter || "";
   if (!list.length) { el.innerHTML = `<li class="empty">No projects yet. Tell me about one — “Jarvis, new project: website relaunch, due 1 December.”</li>`; return; }
   el.innerHTML = list.map((p) => {
     const dl = p.deadline ? ` · due ${new Date(p.deadline).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "";
-    return `<li data-id="${p.id}"><div class="proj-top"><span class="proj-name">${esc(p.name)} <span class="prio ${p.priority}">${p.priority}</span></span><span class="proj-pct">${p.progress_percent}%</span></div>
+    const sel = String(p.id) === state.taskFilter ? " selected" : "";
+    return `<li data-id="${p.id}" class="${sel}"><div class="proj-top"><span class="proj-name">${esc(p.name)} <span class="prio ${p.priority}">${p.priority}</span></span><span class="proj-pct">${p.progress_percent}% <button class="proj-info" data-info="${p.id}" title="Project details" aria-label="Project details">ⓘ</button></span></div>
       <div class="bar"><i style="width:${p.progress_percent}%"></i></div>
       <div class="proj-meta">${p.tasks_done}/${p.tasks_total} tasks${dl}${p.status === "paused" ? " · paused" : ""}</div></li>`;
   }).join("");
-  $$("#projects li[data-id]").forEach((li) => li.addEventListener("click", () => openProject(li.dataset.id)));
+  $$("#projects li[data-id]").forEach((li) => li.addEventListener("click", (e) => {
+    if (e.target.closest("[data-info]")) { openProject(li.dataset.id); return; }
+    setTaskFilter(state.taskFilter === li.dataset.id ? "" : li.dataset.id);   // click again to show all
+  }));
+}
+
+function setTaskFilter(value) {
+  state.taskFilter = value || "";
+  try { localStorage.setItem("jarvis.taskFilter", state.taskFilter); } catch {}
+  $("#taskProject").value = state.taskFilter;
+  $$("#projects li[data-id]").forEach((li) => li.classList.toggle("selected", li.dataset.id === state.taskFilter));
+  renderTasks(state.overview?.tasks || []);
+}
+$("#taskProject").addEventListener("change", (e) => setTaskFilter(e.target.value));
+$("#prioritiseBtn").addEventListener("click", () => {
+  setTaskFilter("priority");
+  setTab("assistant");
+  send("Look at all my open tasks, projects, deadlines and today's calendar, and give me a prioritised to-do list: " +
+       "what I should do first, second and third, and why. Keep it short. If priorities or due dates should change, update them.");
+});
+
+function taskRow(t, today, showProject) {
+  const overdue = t.due_date && t.due_date < today;
+  const meta = [showProject && t.project && esc(t.project),
+    t.due_date && `<span class="${overdue ? "overdue" : ""}">${overdue ? "overdue · " : ""}${t.due_date === today ? "today" : fmtDay(t.due_date)}</span>`,
+    t.priority !== "medium" && `<span class="prio ${t.priority}">${t.priority}</span>`, t.status === "in_progress" && "in progress"].filter(Boolean).join(" ");
+  return `<li class="${t.status === "done" ? "done" : ""}" data-id="${t.id}"><button class="check" aria-label="Toggle done"></button>
+    <div><div class="tt" dir="auto">${esc(t.title)}</div>${meta ? `<div class="tm">${meta}</div>` : ""}</div><button class="del" aria-label="Delete">✕</button></li>`;
+}
+
+/* How urgent a task is: overdue / due soon, its own priority, already started, and its project's weight. */
+function taskScore(t, projects, today) {
+  let sc = { high: 40, medium: 20, low: 0 }[t.priority] ?? 20;
+  if (t.due_date) {
+    const days = Math.round((new Date(t.due_date + "T12:00") - new Date(today + "T12:00")) / 864e5);
+    if (days < 0) sc += 100 + Math.min(-days, 10) * 5;     // overdue: most urgent, more so the older it is
+    else if (days === 0) sc += 80;
+    else if (days <= 2) sc += 60;
+    else if (days <= 7) sc += 30;
+    else if (days <= 14) sc += 10;
+  }
+  if (t.status === "in_progress") sc += 15;                  // finish what you started
+  const p = projects.find((x) => String(x.id) === String(t.project_id));
+  if (p) {
+    sc += { high: 15, medium: 5, low: 0 }[p.priority] ?? 5;
+    if (p.deadline) {
+      const pd = Math.round((new Date(p.deadline + "T12:00") - new Date(today + "T12:00")) / 864e5);
+      if (pd <= 14) sc += 10;
+    }
+  }
+  return sc;
 }
 
 function renderTasks(list) {
-  $("#taskTag").textContent = list.length;
   $("#statTasks").textContent = list.length;
-  const el = $("#tasks"), today = todayISO();
-  if (!list.length) { el.innerHTML = `<li class="empty" style="display:block">All clear.</li>`; return; }
-  el.innerHTML = list.map((t) => {
-    const overdue = t.due_date && t.due_date < today;
-    const meta = [t.project && esc(t.project), t.due_date && `<span class="${overdue ? "overdue" : ""}">${overdue ? "overdue · " : ""}${t.due_date === today ? "today" : fmtDay(t.due_date)}</span>`,
-      t.priority !== "medium" && `<span class="prio ${t.priority}">${t.priority}</span>`, t.status === "in_progress" && "in progress"].filter(Boolean).join(" ");
-    return `<li class="${t.status === "done" ? "done" : ""}" data-id="${t.id}"><button class="check" aria-label="Toggle done"></button>
-      <div><div class="tt" dir="auto">${esc(t.title)}</div>${meta ? `<div class="tm">${meta}</div>` : ""}</div><button class="del" aria-label="Delete">✕</button></li>`;
-  }).join("");
+  const el = $("#tasks"), today = todayISO(), f = state.taskFilter || "";
+  const projects = state.overview?.projects || [];
+  const name = f && f !== "none" ? (projects.find((p) => String(p.id) === f)?.name || "") : "";
+  $("#taskInput").placeholder = name ? `Add a task to ${name}…` : "Add a task…";
+  $("#tasks").classList.toggle("ranked", f === "priority");
+
+  let html = "", shown = 0;
+  if (f === "priority") {
+    const ranked = list.filter((t) => t.status !== "done")
+      .map((t) => ({ t, sc: taskScore(t, projects, today) }))
+      .sort((a, b) => b.sc - a.sc || a.t.id - b.t.id);
+    shown = ranked.length;
+    html = ranked.map(({ t }, i) => taskRow(t, today, true).replace('<button class="check"', `<span class="rank">${i + 1}</span><button class="check"`)).join("") ||
+      `<li class="empty" style="display:block">All clear.</li>`;
+  } else if (f) {
+    const rows = list.filter((t) => (f === "none" ? !t.project_id : String(t.project_id) === f));
+    shown = rows.length;
+    html = rows.map((t) => taskRow(t, today, false)).join("") ||
+      `<li class="empty" style="display:block">${name ? `Nothing open for ${esc(name)}.` : "No unassigned tasks."}</li>`;
+  } else {
+    // group under project headings, in the same order as the Projects panel; unassigned last
+    const groups = projects.map((p) => ({ id: String(p.id), name: p.name, tasks: list.filter((t) => String(t.project_id) === String(p.id)) }));
+    const known = new Set(projects.map((p) => String(p.id)));
+    groups.push({ id: "none", name: "No project", tasks: list.filter((t) => !t.project_id || !known.has(String(t.project_id))) });
+    for (const g of groups.filter((g) => g.tasks.length)) {
+      html += `<li class="task-group" data-filter="${g.id}"><span>${esc(g.name)}</span><span class="tag">${g.tasks.length}</span></li>`;
+      html += g.tasks.map((t) => taskRow(t, today, false)).join("");
+    }
+    shown = list.length;
+    if (!html) html = `<li class="empty" style="display:block">All clear.</li>`;
+  }
+  $("#taskTag").textContent = shown;
+  el.innerHTML = html;
+  $$("#tasks li.task-group").forEach((li) => (li.onclick = () => setTaskFilter(li.dataset.filter)));
   $$("#tasks li[data-id]").forEach((li) => {
     $(".check", li).onclick = async () => { li.classList.toggle("done"); await postJSON(`/api/tasks/${li.dataset.id}/toggle`); setTimeout(() => refresh(), 600); };
     $(".del", li).onclick = async () => { li.remove(); await api(`/api/tasks/${li.dataset.id}`, { method: "DELETE" }); refresh(); };
@@ -807,7 +886,8 @@ $("#taskForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = $("#taskInput").value.trim(); if (!title) return;
   $("#taskInput").value = "";
-  await postJSON("/api/tasks", { title, project: $("#taskProject").value || null });
+  const f = state.taskFilter || "";
+  await postJSON("/api/tasks", { title, project: f && f !== "none" && f !== "priority" ? f : null });
   refresh();
 });
 

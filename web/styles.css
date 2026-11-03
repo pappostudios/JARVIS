@@ -197,10 +197,20 @@ body.live-on .chips, body.live-on #micBtn, body.live-on #convBtn { display: none
 .prio.high { color: var(--red); } .prio.medium { color: var(--amber); } .prio.low { color: var(--muted); }
 
 /* tasks */
+.tasks li.task-group { display: flex; justify-content: space-between; align-items: center; grid-template-columns: none;
+  padding: 10px 2px 4px; border-bottom: 1px solid var(--line-2); cursor: pointer;
+  font: 600 11px var(--display); letter-spacing: .18em; text-transform: uppercase; color: var(--cyan); }
+.tasks li.task-group:first-child { padding-top: 2px; }
+.tasks li.task-group:hover { color: #fff; }
+.projects li.selected { background: rgba(70, 217, 255, .08); box-shadow: inset 2px 0 0 var(--cyan); border-radius: 6px; }
+.tasks.ranked li[data-id] { grid-template-columns: 18px 22px 1fr auto; }
+.tasks .rank { font: 600 13px var(--display); color: var(--cyan); text-align: right; padding-top: 1px; }
+.proj-info { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; padding: 0 0 0 6px; }
+.proj-info:hover { color: var(--cyan); }
 .task-form { display: flex; gap: 6px; margin-bottom: 8px; }
 .task-form input, .task-form select { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; outline: 0; min-width: 0; }
 .task-form input { flex: 1; }
-.task-form select { max-width: 120px; }
+.task-form select { max-width: 150px; }
 .task-form input:focus, .task-form select:focus { border-color: var(--cyan-dim); }
 .tasks li { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: start; padding: 7px 2px; border-bottom: 1px solid var(--line); }
 .tasks li:last-child { border-bottom: 0; }

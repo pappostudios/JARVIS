@@ -356,3 +356,56 @@ def forget(memory_id: int) -> dict:
     """
     db.execute("DELETE FROM memories WHERE id=?", (memory_id,))
     return {"forgotten": memory_id}
+
+
+# ── prioritising ──────────────────────────────────────────────
+def _urgency(task: dict, projects_by_id: dict, today) -> int:
+    """Same ranking as the dashboard's "Priority order" view."""
+    from datetime import date
+
+    score = {"high": 40, "medium": 20, "low": 0}.get(task.get("priority") or "medium", 20)
+    if task.get("due_date"):
+        try:
+            days = (date.fromisoformat(task["due_date"]) - today).days
+            if days < 0:
+                score += 100 + min(-days, 10) * 5
+            elif days == 0:
+                score += 80
+            elif days <= 2:
+                score += 60
+            elif days <= 7:
+                score += 30
+            elif days <= 14:
+                score += 10
+        except ValueError:
+            pass
+    if task.get("status") == "in_progress":
+        score += 15
+    p = projects_by_id.get(task.get("project_id"))
+    if p:
+        score += {"high": 15, "medium": 5, "low": 0}.get(p.get("priority") or "medium", 5)
+        if p.get("deadline"):
+            try:
+                if (date.fromisoformat(p["deadline"]) - today).days <= 14:
+                    score += 10
+            except ValueError:
+                pass
+    return score
+
+
+def prioritized_tasks(limit: int = 15) -> list[dict]:
+    """The user's open tasks across ALL projects, ranked in the order they should be done (most urgent first):
+    overdue and soon-due work first, then task priority, tasks already in progress, and the project's importance
+    and deadline. Use this when the user asks what to do first / next, or for a prioritised to-do list.
+
+    Args:
+        limit: How many tasks to return.
+    """
+    from . import config
+
+    today = config.now().date()
+    projects_by_id = {p["id"]: p for p in db.query("SELECT * FROM projects")}
+    tasks = list_tasks(status="open", limit=500)
+    ranked = sorted(tasks, key=lambda t: (-_urgency(t, projects_by_id, today), t["id"]))
+    return [{"rank": i + 1, **t, "urgency_score": _urgency(t, projects_by_id, today)}
+            for i, t in enumerate(ranked[: int(limit)])]

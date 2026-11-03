@@ -120,7 +120,7 @@ TOOL_FUNCS: list[Callable[..., Any]] = [
     g.mark_emails_read, g.archive_emails,
     # projects & tasks
     p.list_projects, p.get_project, p.create_project, p.update_project, p.delete_project, p.log_progress,
-    p.add_task, p.list_tasks, p.update_task, p.complete_task, p.delete_task,
+    p.add_task, p.list_tasks, p.prioritized_tasks, p.update_task, p.complete_task, p.delete_task,
     # memory
     p.remember, p.list_memories, p.forget,
     # approvals
@@ -137,7 +137,7 @@ STATUS_LABELS = {
     "archive_emails": "Archiving", "remember": "Committing to memory",
     "list_projects": "Reviewing projects", "get_project": "Reviewing project", "create_project": "Creating project",
     "update_project": "Updating project", "log_progress": "Logging progress", "add_task": "Updating to-do list",
-    "list_tasks": "Checking to-do list", "update_task": "Updating to-do list", "complete_task": "Ticking it off",
+    "list_tasks": "Checking to-do list", "prioritized_tasks": "Prioritising", "update_task": "Updating to-do list", "complete_task": "Ticking it off",
     "confirm_action": "Executing", "get_current_time": "Checking the time",
 }
 

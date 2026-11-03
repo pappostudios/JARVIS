@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
@@ -123,10 +123,10 @@
         <ul id="projects" class="projects"></ul>
       </article>
       <article class="panel" data-tab="work">
-        <header class="panel-h"><h2>To-do</h2><span class="tag" id="taskTag">0</span></header>
+        <header class="panel-h"><h2>To-do</h2><span class="row" style="gap:6px;align-items:center"><button class="mini" id="prioritiseBtn" title="Ask JARVIS what to do first">⚡ Prioritise</button><span class="tag" id="taskTag">0</span></span></header>
         <form id="taskForm" class="task-form">
           <input id="taskInput" placeholder="Add a task…" autocomplete="off">
-          <select id="taskProject" aria-label="Project"><option value="">No project</option></select>
+          <select id="taskProject" aria-label="Show tasks for project"><option value="">All projects</option></select>
         </form>
         <ul id="tasks" class="tasks"></ul>
       </article>
@@ -251,6 +251,6 @@
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>
