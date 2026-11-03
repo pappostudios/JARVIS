@@ -10,10 +10,9 @@ from google.genai import types
 
 from . import config, db
 
-TTS_STYLE = (
-    "Read the following in a calm, refined, received-pronunciation British English accent — "
-    "a composed, warm and slightly wry English butler. Natural pace, no theatrics:\n\n"
-)
+# No spoken style instruction is sent: TTS models sometimes read such an instruction aloud before the reply.
+# British English is requested through the speech config's language code instead (when the reply is English).
+_lang_code_ok = True
 
 GEMINI_VOICES = [
     "Charon", "Iapetus", "Algenib", "Orus", "Rasalgethi", "Sadaltager", "Schedar", "Alnilam",
@@ -92,16 +91,30 @@ def _gemini_tts(text: str, voice: str) -> tuple[bytes, str]:
 
 
 def _gemini_tts_call(model: str, text: str, voice: str):
-    return _client().models.generate_content(
-        model=model,
-        contents=TTS_STYLE + text,
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice))
+    global _lang_code_ok
+    latin = not re.search(r"[\u0590-\u06FF\u0400-\u04FF\u3040-\u9FFF]", text)  # Hebrew/Arabic/Cyrillic/CJK: no en-GB
+    use_lang = _lang_code_ok and latin
+
+    def call(with_lang: bool):
+        return _client().models.generate_content(
+            model=model,
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)),
+                    language_code="en-GB" if with_lang else None,
+                ),
             ),
-        ),
-    )
+        )
+
+    try:
+        return call(use_lang)
+    except Exception as e:  # noqa: BLE001
+        if use_lang and "400" in str(e) and "language" in str(e).lower():
+            _lang_code_ok = False  # this TTS model doesn't take a language code: just use the voice
+            return call(False)
+        raise
 
 
 async def _edge_tts(text: str, voice: str) -> tuple[bytes, str]:
