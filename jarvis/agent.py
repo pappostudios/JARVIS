@@ -257,6 +257,7 @@ class Jarvis:
                 break
             wait_s = min(FIRST_TRY_TIMEOUT_S.get(level, 20) if i == 0 else BACKUP_TIMEOUT_S, remaining)
             while t_idx < len(thinking):
+                usage.check_limit()
                 cfg = config_.model_copy()
                 cfg.thinking_config = thinking[t_idx]
                 cfg.http_options = types.HttpOptions(timeout=int(wait_s * 1000) + 2000,
@@ -389,6 +390,7 @@ class Jarvis:
         client = self._ensure_client()
         contents: list[Any] = list(parts or []) + [prompt]
         m = model or config.GEMINI_FAST_MODEL
+        usage.check_limit()
         try:
             resp = client.models.generate_content(model=m, contents=contents)
             usage.record_ok(m, "transcribe", resp)
@@ -397,6 +399,7 @@ class Jarvis:
             if e.code not in (404, 429):
                 raise
             m = self.model  # fast model missing or out of quota: use the main model
+            usage.check_limit()
             try:
                 resp = client.models.generate_content(model=m, contents=contents)
                 usage.record_ok(m, "transcribe", resp)

@@ -77,6 +77,33 @@ def record_error(model: str, kind: str, error: Exception | str) -> None:
         _bump(model, kind, requests=1, errors=1)
 
 
+class DailyLimitReached(RuntimeError):
+    pass
+
+
+def requests_today() -> int:
+    """Gemini requests made today, excluding Live calls (billed by minutes, not requests)."""
+    r = db.query_one("SELECT COALESCE(SUM(requests), 0) AS n FROM usage WHERE day=? AND kind != 'live'", (_today(),))
+    return int(r["n"]) if r else 0
+
+
+def daily_limit() -> int:
+    try:
+        return max(0, int(float(db.get_setting("daily_request_limit") or 0)))
+    except ValueError:
+        return 0
+
+
+def check_limit() -> None:
+    """Raise before a Gemini request if today's limit (Settings) has been reached."""
+    limit = daily_limit()
+    if limit and requests_today() >= limit:
+        raise DailyLimitReached(
+            f"I've reached today's limit of {limit} Gemini requests that you set, so I've paused to keep you within "
+            "budget. You can raise or remove the limit in Settings → Usage limit; it resets at midnight. "
+            "(Live calls still work.)")
+
+
 def _cost(inp: int, out: int, cached: int, price: tuple[float, float, float]) -> float:
     p_in, p_out, p_cache = price
     return ((max(inp - cached, 0)) * p_in + cached * p_cache + out * p_out) / 1_000_000
@@ -146,5 +173,6 @@ def summary(days: int = 14) -> dict:
         verdict = (f"You hit free-tier limits on {quota_days} of {n_days} — upgrading to the paid tier "
                    "is recommended for reliable use.")
     return {"days": list(per_day.values()), "today": t, "models_today": models_today,
+            "limit": daily_limit(), "requests_today": requests_today(),
             "estimates": estimates, "live": live, "active_days": len(active), "quota_days": quota_days, "verdict": verdict,
             "kinds": KIND_LABELS}

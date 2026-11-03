@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
@@ -210,6 +210,13 @@
           <button class="btn" id="testVoice">Test voice</button>
         </section>
         <section>
+          <h3>Usage limit</h3>
+          <label>Daily Gemini request limit (0 = no limit)
+            <input id="s_daily_request_limit" type="number" min="0" step="10" inputmode="numeric" placeholder="0">
+          </label>
+          <p class="muted" style="margin:0;font-size:12px">When reached, JARVIS pauses text &amp; voice messages until midnight and speaks with the free Microsoft voice. Live calls aren't counted. See today's count under System → Usage &amp; free tier.</p>
+        </section>
+        <section>
           <h3>Safety</h3>
           <label class="switch"><input type="checkbox" id="s_require_confirmation"><span>Ask before sending emails, inviting people or deleting events</span></label>
         </section>
@@ -251,6 +258,6 @@
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

@@ -76,6 +76,7 @@ def _gemini_tts(text: str, voice: str) -> tuple[bytes, str]:
     from . import usage
 
     model = tts_model()
+    usage.check_limit()  # at the daily limit: synthesize() falls back to the free Microsoft voice
     try:
         resp = _gemini_tts_call(model, text, voice)
     except Exception as e:

@@ -951,7 +951,7 @@ function checkReminders() {
 setInterval(checkReminders, 30000);
 
 /* ───────────────────────── settings ───────────────────────── */
-const SETTING_FIELDS = ["live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
+const SETTING_FIELDS = ["daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
 
 async function openSettings() {
   $("#settings").classList.remove("hidden");
@@ -1033,7 +1033,7 @@ $("#usageBtn").addEventListener("click", guard(async () => {
     <div class="usage-verdict ${u.quota_days ? "warn" : ""}">${esc(u.verdict)}</div>
     <section><h3>Today</h3>
       <div class="usage-stats">
-        <div><span class="stat-v">${t.requests}</span><span class="stat-l">Gemini requests</span></div>
+        <div><span class="stat-v" style="${u.limit && u.requests_today >= u.limit ? "color:var(--amber)" : ""}">${u.limit ? `${u.requests_today}<small style="font-size:13px;color:var(--muted)"> / ${u.limit}</small>` : t.requests}</span><span class="stat-l">${u.limit ? "Requests / daily limit" : "Gemini requests"}</span></div>
         <div><span class="stat-v" style="${t.quota_errors ? "color:var(--amber)" : ""}">${t.quota_errors}</span><span class="stat-l">Refused (quota)</span></div>
         <div><span class="stat-v">${fmt(t.input_tokens + t.output_tokens)}</span><span class="stat-l">Tokens</span></div>
         <div><span class="stat-v">${t.live_minutes.toFixed(1)}</span><span class="stat-l">Live minutes</span></div>
