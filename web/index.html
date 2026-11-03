@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
@@ -83,6 +83,7 @@
       </div>
       <div class="chat" id="chat" aria-live="polite"></div>
       <button class="approval-bar hidden" id="approvalBar" type="button"></button>
+      <div class="live-banner"><i></i><span id="liveText">Live call</span></div>
       <div class="chips" id="chips">
         <button data-q="Give me my briefing for today.">Briefing</button>
         <button data-q="Summarise my unread emails — what needs my attention?">Inbox summary</button>
@@ -91,6 +92,9 @@
         <button data-q="How are my projects progressing?">Projects</button>
       </div>
       <form class="composer" id="composer">
+        <button type="button" class="live-btn" id="liveBtn" aria-label="Start live voice call" title="Live call — talk naturally, like a phone call">
+          <svg viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>
+        </button>
         <button type="button" class="mic" id="micBtn" aria-label="Talk to JARVIS" title="Talk (hold Space)">
           <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
         </button>
@@ -202,6 +206,7 @@
           <label id="geminiVoiceRow">Gemini voice<select id="s_gemini_voice"></select></label>
           <label id="edgeVoiceRow">British voice<select id="s_edge_voice"></select></label>
           <label class="switch"><input type="checkbox" id="s_auto_speak"><span>Speak replies aloud</span></label>
+          <label class="switch"><input type="checkbox" id="s_live_interrupt"><span>Live calls: interrupt JARVIS by speaking (use headphones — with speakers he may hear himself)</span></label>
           <button class="btn" id="testVoice">Test voice</button>
         </section>
         <section>
@@ -245,6 +250,6 @@
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

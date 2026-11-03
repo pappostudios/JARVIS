@@ -8,7 +8,7 @@ import secrets
 import time
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -38,7 +38,7 @@ def _token() -> str:
     return hmac.new(_SECRET, config.ACCESS_CODE.encode(), hashlib.sha256).hexdigest()
 
 
-def _authed(request: Request) -> bool:
+def _authed(request: Request | WebSocket) -> bool:
     if not config.ACCESS_CODE:
         return True
     if request.url.path == "/api/shutdown" and hmac.compare_digest(request.headers.get("x-admin-token", ""), _ADMIN):
@@ -408,6 +408,18 @@ def google_disconnect():
     g.disconnect()
     _overview_cache["t"] = 0
     return {"ok": True}
+
+
+# ── live voice (phone-call mode) ──────────────────────────────
+@app.websocket("/api/live")
+async def live_call(ws: WebSocket):
+    if not _authed(ws):
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    from . import live
+
+    await live.handle(ws)
 
 
 # ── static dashboard ──────────────────────────────────────────

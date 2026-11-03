@@ -112,6 +112,22 @@ HTTPS**, so for voice either use Tailscale (above), or in Chrome open `chrome://
 add `http://<your-computer-ip>:8765`, enable, relaunch.
 If Windows asks about the firewall the first time, allow **Private networks**.
 
+## Live call mode (talk like a phone call)
+
+Press the green **phone button** next to the microphone. JARVIS opens one continuous connection to **Gemini Live**:
+your voice streams in while you speak, he answers in his own voice within about a second, and he can still check your
+calendar, email and tasks mid-conversation. Press the red button to hang up.
+
+- **Model:** the newest Live model your key offers (e.g. `gemini-3.1-flash-live-preview`), with older Live models
+  as backup. The name is shown under the chat during a call.
+- **Quota:** Live has its own quota, separate from the text models, so calls keep working when typed chat hits
+  its free-tier limit.
+- **Interrupting:** with speakers, JARVIS pauses your mic while he talks so he doesn't hear himself. With
+  headphones, turn on *Settings → Voice → Live calls: interrupt JARVIS by speaking*. You can always tap the glowing
+  core to cut him off.
+- Typing during a call sends the text into the call. Everything said is saved to your chat history.
+- On a phone the microphone needs the HTTPS (Tailscale) address, as for normal voice.
+
 ## 6. The voice (British accent)
 
 Choose in **Settings → Voice**:

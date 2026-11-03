@@ -60,6 +60,7 @@ DEFAULT_SETTINGS = {
     "gemini_voice": "Charon",     # Gemini prebuilt voice
     "edge_voice": "en-GB-RyanNeural",
     "auto_speak": "true",
+    "live_interrupt": "false",    # live calls: let your voice interrupt JARVIS (best with headphones)
     "work_start": "09:00",
     "work_end": "18:00",
     "require_confirmation": "true",  # ask before sending email / inviting people / deleting events

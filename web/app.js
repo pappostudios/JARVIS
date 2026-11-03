@@ -402,7 +402,7 @@ $("#micBtn").addEventListener("click", () => startListening());
 // Push-to-talk: hold Space when not typing
 let spaceHeld = false;
 document.addEventListener("keydown", (e) => {
-  if (e.code !== "Space" || e.repeat || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+  if (e.code !== "Space" || e.repeat || live.active || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
   e.preventDefault(); spaceHeld = true;
   startListening().then(() => {
     if (!recorder) return;
@@ -420,6 +420,160 @@ $("#convBtn").addEventListener("click", () => {
   toast(state.convMode ? "Conversation mode on — I'll keep listening after each reply." : "Conversation mode off.");
 });
 $("#convBtn").setAttribute("aria-pressed", state.convMode);
+
+/* ───────────────────────── live voice call ─────────────────────────
+   Phone-call mode: the mic streams to JARVIS (16 kHz PCM) over a WebSocket, JARVIS relays it to Gemini Live,
+   and Gemini's voice streams back (24 kHz PCM) and is played as it arrives. */
+const CAPTURE_WORKLET = `
+class JarvisCapture extends AudioWorkletProcessor {
+  constructor() { super(); this.ratio = sampleRate / 16000; this.pos = 0; this.acc = 0; this.n = 0; this.buf = []; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      this.acc += ch[i]; this.n++; this.pos++;
+      if (this.pos >= this.ratio) { this.pos -= this.ratio; this.buf.push(this.acc / this.n); this.acc = 0; this.n = 0; }
+    }
+    if (this.buf.length >= 640) {            // 40 ms chunks
+      const out = new Int16Array(this.buf.length); let sum = 0;
+      for (let i = 0; i < this.buf.length; i++) { const v = Math.max(-1, Math.min(1, this.buf[i])); out[i] = v < 0 ? v * 32768 : v * 32767; sum += v * v; }
+      this.port.postMessage({ pcm: out.buffer, rms: Math.sqrt(sum / this.buf.length) }, [out.buffer]);
+      this.buf = [];
+    }
+    return true;
+  }
+}
+registerProcessor("jarvis-capture", JarvisCapture);`;
+
+const live = { ws: null, stream: null, src: null, node: null, sink: null, playhead: 0, sources: [], userEl: null, jarvisEl: null,
+  active: false, workletLoaded: false, dropAudio: false, quietUntil: 0, model: "" };
+
+function liveSpeaking() { return live.sources.length > 0; }
+
+function livePlay(buf) {
+  if (live.dropAudio || !audioCtx) return;
+  if (buf.byteLength % 2) buf = buf.slice(0, buf.byteLength - 1);
+  const i16 = new Int16Array(buf), f = new Float32Array(i16.length);
+  for (let i = 0; i < i16.length; i++) f[i] = i16[i] / 32768;
+  const ab = audioCtx.createBuffer(1, f.length, 24000);
+  ab.copyToChannel(f, 0);
+  const node = audioCtx.createBufferSource();
+  node.buffer = ab; node.connect(outAnalyser);
+  const t = Math.max(audioCtx.currentTime + 0.03, live.playhead);
+  node.start(t);
+  live.playhead = t + ab.duration;
+  live.sources.push(node);
+  core.set("speaking", "Speaking");
+  node.onended = () => {
+    live.sources = live.sources.filter((x) => x !== node);
+    if (!live.sources.length) { live.quietUntil = performance.now() + 350; if (live.active) core.set("listening", "Live — go ahead"); }
+  };
+}
+
+function liveFlush() {
+  live.sources.forEach((n) => { try { n.stop(); } catch {} });
+  live.sources = []; live.playhead = 0;
+}
+
+function liveBubble(role, text) {
+  const key = role === "user" ? "userEl" : "jarvisEl";
+  if (!live[key]) {
+    live[key] = addMessage(role, "");
+    live[key].classList.add("live");
+    live[key].dataset.raw = "";
+  }
+  const el = live[key];
+  el.dataset.raw += text;
+  el.innerHTML = renderMarkdown(el.dataset.raw.trim());
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function onLiveEvent(ev) {
+  switch (ev.type) {
+    case "ready":
+      live.model = ev.model;
+      $("#liveBtn").classList.remove("connecting");
+      $("#liveText").textContent = `Live call · ${ev.model}`;
+      core.set("listening", "Live — go ahead");
+      if (!ev.resumed) toast(`Live call connected (${ev.model}). Just talk.`);
+      break;
+    case "user_text": liveBubble("user", ev.text); break;
+    case "jarvis_text": liveBubble("jarvis", ev.text); break;
+    case "interrupted": liveFlush(); break;
+    case "turn_complete":
+      live.userEl = live.jarvisEl = null; live.dropAudio = false;
+      $("#liveText").textContent = `Live call · ${live.model}`;
+      if (!liveSpeaking()) core.set("listening", "Live — go ahead");
+      break;
+    case "status": core.set("thinking", ev.text); $("#liveText").textContent = `Live call · ${ev.text}`; break;
+    case "refresh": refresh(true); break;
+    case "error": toast(ev.text, "bad"); addMessage("jarvis", "⚠ " + ev.text, { error: true }); break;
+  }
+}
+
+async function startLive() {
+  if (live.active) return stopLive();
+  if (!navigator.mediaDevices?.getUserMedia) { toast("The microphone needs HTTPS on phones — see README → Phone microphone.", "warn"); return; }
+  const ctx = ensureAudio();
+  stopSpeaking(); if (recorder) stopListening();
+  $("#liveBtn").classList.add("connecting");
+  try {
+    live.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    if (!live.workletLoaded) {
+      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([CAPTURE_WORKLET], { type: "application/javascript" })));
+      live.workletLoaded = true;
+    }
+  } catch (e) { $("#liveBtn").classList.remove("connecting"); toast("Microphone unavailable: " + e.message, "bad"); return; }
+
+  live.active = true; live.dropAudio = false; live.userEl = live.jarvisEl = null;
+  document.body.classList.add("live-on");
+  $("#liveBtn").classList.add("on"); $("#liveBtn").setAttribute("aria-label", "End live call");
+  $("#liveText").textContent = "Live call · connecting";
+  core.set("thinking", "Connecting");
+
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/live`);
+  ws.binaryType = "arraybuffer";
+  live.ws = ws;
+  ws.onmessage = (e) => (typeof e.data === "string" ? onLiveEvent(JSON.parse(e.data)) : livePlay(e.data));
+  ws.onclose = (e) => {
+    if (live.ws !== ws) return;
+    if (e.code === 4401) { showLogin(); }
+    if (live.active) { stopLive(true); }
+  };
+  ws.onerror = () => {};
+
+  live.src = ctx.createMediaStreamSource(live.stream);
+  live.node = new AudioWorkletNode(ctx, "jarvis-capture");
+  live.sink = ctx.createGain(); live.sink.gain.value = 0;      // keeps the worklet running without playing the mic
+  live.src.connect(live.node); live.node.connect(live.sink); live.sink.connect(ctx.destination);
+  live.node.port.onmessage = ({ data }) => {
+    if (!liveSpeaking()) state.micLevel = Math.min(1, data.rms * 9);
+    if (!live.ws || live.ws.readyState !== 1) return;
+    // Without headphones JARVIS would hear himself: hold the mic while he talks unless the user allowed interrupting.
+    const mayInterrupt = state.settings.live_interrupt === "true";
+    if (!mayInterrupt && (liveSpeaking() || performance.now() < live.quietUntil)) return;
+    live.ws.send(data.pcm);
+  };
+}
+
+function stopLive(remote = false) {
+  const ws = live.ws; live.ws = null;
+  if (ws && ws.readyState <= 1) { try { ws.send(JSON.stringify({ type: "hangup" })); } catch {} ws.close(); }
+  live.active = false;
+  liveFlush();
+  try { live.src?.disconnect(); live.node?.disconnect(); live.sink?.disconnect(); } catch {}
+  live.stream?.getTracks().forEach((t) => t.stop());
+  live.stream = live.src = live.node = live.sink = null;
+  document.body.classList.remove("live-on");
+  $("#liveBtn").classList.remove("on", "connecting"); $("#liveBtn").setAttribute("aria-label", "Start live voice call");
+  state.micLevel = 0;
+  core.set("idle", remote ? "Call ended" : "Standing by");
+  if (remote) setTimeout(() => state.coreMode === "idle" && core.set("idle"), 2500);
+}
+
+$("#liveBtn").addEventListener("click", () => startLive());
+// Tap the core while JARVIS is talking in a call to cut him off.
+$("#core").addEventListener("click", () => { if (live.active && liveSpeaking()) { liveFlush(); live.dropAudio = true; } });
 
 /* ───────────────────────── chat ───────────────────────── */
 const chatEl = $("#chat");
@@ -497,7 +651,12 @@ async function send(text) {
 }
 
 const input = $("#input");
-$("#composer").addEventListener("submit", (e) => { e.preventDefault(); state.lastInputWasVoice = false; const t = input.value; input.value = ""; autoGrow(); send(t); });
+$("#composer").addEventListener("submit", (e) => {
+  e.preventDefault(); state.lastInputWasVoice = false; const t = input.value.trim(); input.value = ""; autoGrow();
+  if (!t) return;
+  if (live.active && live.ws?.readyState === 1) { liveBubble("user", t); live.ws.send(JSON.stringify({ type: "text", text: t })); return; }
+  send(t);
+});
 input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#composer").requestSubmit(); } });
 const autoGrow = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; };
 input.addEventListener("input", autoGrow);
@@ -711,7 +870,7 @@ function checkReminders() {
 setInterval(checkReminders, 30000);
 
 /* ───────────────────────── settings ───────────────────────── */
-const SETTING_FIELDS = ["model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
+const SETTING_FIELDS = ["live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
 
 async function openSettings() {
   $("#settings").classList.remove("hidden");
