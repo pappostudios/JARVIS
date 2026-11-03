@@ -22,6 +22,7 @@ projects and to-do list, and helps you plan your day. You can talk to him or typ
 | **Email** | “Summarise my unread emails” · “Anything urgent from Sarah?” · “Reply to the invoice email saying we'll pay Friday” · “Draft a follow-up to the investors” · “Archive the newsletters” |
 | **Projects** | “New project: website relaunch, due 1 December, high priority” · “Add a task to write the homepage copy, 2 hours” · “I finished the wireframes” · “How are my projects going?” |
 | **Planning** | “Plan my day” — he combines free calendar slots, deadlines, priorities and estimates, proposes a timed plan and puts focus blocks in your calendar once you agree. |
+| **PC control** | “Open Spotify”, “open my invoices folder”, “pause the music”, “volume to 30%”. |
 | **Memory** | “Remember that I prefer meetings after 10am” · “Remember Pepper is my business partner” — remembered in every conversation. |
 | **Proactive** | Spoken reminder 10 minutes before each meeting, overdue-task awareness, morning briefing button. |
 
@@ -164,6 +165,21 @@ If a voice engine fails, JARVIS automatically falls back to the device voice.
 hands-free back-and-forth.
 
 ---
+
+## PC control (apps, files, media)
+
+JARVIS can act on the computer he runs on — also when you ask from your phone:
+
+| Say | What happens |
+|---|---|
+| "Open Spotify" / "open Chrome" / "open Word" | Launches the app (found by name in your Start menu) |
+| "Open youtube.com" | Opens the site in your default browser |
+| "Find my invoice from October" | Searches Desktop, Documents, Downloads, Pictures, Music, Videos and OneDrive |
+| "Open Dana's client plan" / "open my KJ Fitness folder" | Opens the best-matching file or folder |
+| "Pause the music", "next song", "volume up", "set the volume to 30%" | Media keys and volume (Spotify, YouTube, etc.) |
+
+Safety: the file finder never runs programs or scripts (.exe, .bat, .ps1…) — apps open only through "open app".
+Turn the whole feature off in **Settings → PC control**.
 
 ## Using less (tokens & requests)
 

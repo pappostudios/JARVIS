@@ -64,6 +64,7 @@ DEFAULT_SETTINGS = {
     "work_start": "09:00",
     "work_end": "18:00",
     "require_confirmation": "true",  # ask before sending email / inviting people / deleting events
+    "pc_control": "true",         # let JARVIS open apps/files and control media on this computer
     "model": "auto",
     "model_strict": "false",      # true = never fall back from the chosen model              # "auto" or a specific Gemini model id
     "daily_request_limit": "0",   # max Gemini requests per day (0 = no limit); Live calls not counted

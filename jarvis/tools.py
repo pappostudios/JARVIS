@@ -7,7 +7,7 @@ import traceback
 from datetime import date, datetime
 from typing import Any, Callable, Optional
 
-from . import config, db, google_services as g, projects as p
+from . import config, db, google_services as g, pc_control as pc, projects as p
 
 
 # ── time tool ─────────────────────────────────────────────────
@@ -129,6 +129,8 @@ TOOL_FUNCS: list[Callable[..., Any]] = [
     # projects & tasks
     p.list_projects, p.get_project, p.create_project, p.update_project, p.delete_project, p.log_progress,
     p.add_task, p.list_tasks, p.prioritized_tasks, p.update_task, p.complete_task, p.delete_task,
+    # this computer
+    pc.open_app, pc.open_website, pc.find_files, pc.open_file, pc.open_folder, pc.media_control,
     # memory
     p.remember, p.list_memories, p.forget,
     # approvals
@@ -143,6 +145,8 @@ STATUS_LABELS = {
     "list_emails": "Scanning inbox", "read_email": "Reading email", "send_email": "Composing email",
     "reply_to_email": "Composing reply", "create_draft": "Drafting email", "mark_emails_read": "Tidying inbox",
     "archive_emails": "Archiving", "remember": "Committing to memory",
+    "open_app": "Opening app", "open_website": "Opening website", "find_files": "Searching files",
+    "open_file": "Opening file", "open_folder": "Opening folder", "media_control": "Adjusting media",
     "list_projects": "Reviewing projects", "get_project": "Reviewing project", "create_project": "Creating project",
     "update_project": "Updating project", "log_progress": "Logging progress", "add_task": "Updating to-do list",
     "list_tasks": "Checking to-do list", "prioritized_tasks": "Prioritising", "update_task": "Updating to-do list", "complete_task": "Ticking it off",
@@ -179,7 +183,7 @@ def call_tool(name: str, args: Optional[dict]) -> dict:
             }
         result = fn(**args)
         return {"result": _jsonable(result)}
-    except g.GoogleNotConnected as e:
+    except (g.GoogleNotConnected, pc.PCControlOff) as e:
         return {"error": str(e)}
     except TypeError as e:
         return {"error": f"Bad arguments for {name}: {e}"}
