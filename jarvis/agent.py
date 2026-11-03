@@ -84,6 +84,17 @@ def _system_prompt() -> str:
         parts.append(f"The user's name is {s['user_name']}.")
     if s.get("about_me"):
         parts.append(f"About the user: {s['about_me']}")
+    try:
+        from . import google_services
+
+        accs = google_services.accounts()
+        if len(accs) > 1:
+            parts.append("Connected Google accounts (calendar + Gmail): " + "; ".join(
+                f"{a['label'] or 'unlabelled'} = {a['email']}{' (default)' if a['default'] else ''}" for a in accs)
+                + ". Reading tools cover all accounts unless you pass account=. Send/create from the account that "
+                  "fits the context (work matters from work); replies automatically use the receiving account.")
+    except Exception:  # noqa: BLE001
+        pass
     mems = projects.list_memories()
     if mems:
         parts.append("Things you remember about the user:\n" + "\n".join(f"- [{m['id']}] {m['fact']}" for m in mems[-60:]))

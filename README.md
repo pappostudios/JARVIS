@@ -18,7 +18,7 @@ projects and to-do list, and helps you plan your day. You can talk to him or typ
 
 | Area | Examples |
 |---|---|
-| **Calendar** | “What's on tomorrow?” · “Book a meeting with sam@acme.com Thursday afternoon with a Meet link” · “Move my 3pm to 5” · “Cancel the dentist” · “When am I free on Friday?” |
+| **Calendar** | Works across personal + work accounts. “What's on tomorrow?” · “Book a meeting with sam@acme.com Thursday afternoon with a Meet link” · “Move my 3pm to 5” · “Cancel the dentist” · “When am I free on Friday?” |
 | **Email** | “Summarise my unread emails” · “Anything urgent from Sarah?” · “Reply to the invoice email saying we'll pay Friday” · “Draft a follow-up to the investors” · “Archive the newsletters” |
 | **Projects** | “New project: website relaunch, due 1 December, high priority” · “Add a task to write the homepage copy, 2 hours” · “I finished the wireframes” · “How are my projects going?” |
 | **Planning** | “Plan my day” — he combines free calendar slots, deadlines, priorities and estimates, proposes a timed plan and puts focus blocks in your calendar once you agree. |
@@ -72,6 +72,27 @@ Google requires you to create that key yourself — JARVIS walks you through it:
 > While the app is in “Testing” mode Google expires the sign-in after 7 days. To avoid re-connecting weekly,
 > go to the OAuth consent screen / Audience page and click **Publish app** (no review is needed for personal use
 > with your own account; you'll just keep seeing the “unverified” notice when signing in).
+
+### Personal and work accounts
+
+JARVIS can manage several Google accounts at once — e.g. your personal Gmail and your work email.
+
+1. In Google Cloud → **Google Auth Platform → Audience → Test users**, add the second address too.
+2. In JARVIS: **Settings → Google accounts → Add another Google account**, and pick the other account on Google's
+   page ("Use another account" if needed).
+3. Give each account a label (**personal**, **work**) and choose which is the **default**.
+
+How it behaves:
+- **Reading covers everything:** your calendar, inbox, unread count and free-time checks include every account;
+  each event and email shows a small *work* / *personal* tag.
+- **Replies and edits use the right account automatically:** answering a work email goes out from your work address;
+  moving a work meeting changes the work calendar.
+- **New emails and events use the default account** unless you say otherwise — *"email Dana from my work account"*,
+  *"put it in my personal calendar"*.
+- Remove an account any time with **Disconnect** next to it.
+
+> **Work (Google Workspace) accounts:** some companies block apps their IT department hasn't approved. If Google says
+> your administrator has blocked access, ask IT to allow it — or keep JARVIS on your personal account.
 
 ## 4. Start him
 
@@ -143,6 +164,35 @@ If a voice engine fails, JARVIS automatically falls back to the device voice.
 hands-free back-and-forth.
 
 ---
+
+## Using less (tokens & requests)
+
+Every message to JARVIS costs at least one Gemini request, and each one re-sends his instructions, his tool list and
+your recent conversation (roughly 5,000–10,000 tokens). Lookups add a request each. To keep usage down:
+
+| Do this | Why it saves |
+|---|---|
+| **Use the dashboard for simple things** — tick off or add tasks, switch to-do views, read the calendar and inbox panels | No Gemini at all: the panels read Google directly |
+| **Settings → Voice → Engine: Microsoft neural en-GB** (or turn off *Speak replies aloud*) | Saves 1–2 Gemini requests on every spoken reply — and it's very British |
+| **Talk with Live calls** (green phone button) instead of the microphone button | One continuous call on Live's separate quota, no transcription or voice requests |
+| **Settings → Response speed: Fast** | Less "thinking" = fewer output tokens |
+| **Settings → Brain: a Flash-Lite model** for everyday use | Fastest and cheapest; keep the bigger model for heavy planning |
+| **Clear the conversation now and then** (Settings → System) | Recent history is re-sent with every request; a long chat makes every message heavier |
+| **Ask specific questions** — *"any emails from Dana today?"* rather than *"summarise my inbox"* | Fewer emails read = far fewer tokens |
+| **Set a daily limit** (Settings → Usage limit) | Hard stop so a busy day can't run away with your quota or bill |
+
+What each action costs, roughly:
+
+| Action | Gemini requests |
+|---|---|
+| Dashboard panels, task ticks, settings | 0 |
+| Live call | 0 text requests (billed by minutes) |
+| Simple typed question | 1 |
+| Question needing lookups ("what's on today?") | 2–4 |
+| Mic button with Gemini's voice | +1 (transcription) +1–2 (voice) |
+| Briefing / Inbox summary / Plan my day / Prioritise | 3–6, and the most tokens |
+
+Check your real numbers any time in **Settings → System → Usage & free tier**.
 
 ## Configuration (`.env`)
 

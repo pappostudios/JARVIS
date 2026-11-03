@@ -676,8 +676,9 @@ function renderAgenda(list, el, compact = false) {
     const { s, e } = eventTimes(ev);
     const cls = s ? (e < now ? "past" : s <= now ? "now" : "") : "";
     const time = s ? `${fmtTime(s)}<small>${fmtTime(e)}</small>` : "ALL<small>DAY</small>";
+    if (!ev.id) return "";  // a note such as "some calendars could not be read"
     const meta = [ev.location, ev.attendees?.length ? `${ev.attendees.length} attendee${ev.attendees.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
-    return `<li class="${cls}"><span class="t">${time}</span><div><div class="what" dir="auto">${esc(ev.title)}</div>
+    return `<li class="${cls}"><span class="t">${time}</span><div><div class="what" dir="auto">${esc(ev.title)}${ev.account ? `<span class="acct">${esc(ev.account)}</span>` : ""}</div>
       ${meta ? `<div class="meta" dir="auto">${esc(meta)}</div>` : ""}${ev.meet_link && !compact ? `<a href="${esc(ev.meet_link)}" target="_blank" rel="noopener">Join Meet ↗</a>` : ""}</div></li>`;
   }).join("");
 }
@@ -705,12 +706,12 @@ function renderInbox(gd) {
   $("#statUnread").textContent = n;
   const badge = $("#inboxBadge"); badge.textContent = n > 99 ? "99+" : n; badge.classList.toggle("hidden", !n);
   if (!gd.emails?.length) { el.innerHTML = `<li class="empty">Inbox zero. Splendid.</li>`; return; }
-  el.innerHTML = gd.emails.map((m) => {
+  el.innerHTML = gd.emails.filter((m) => m.id).map((m) => {
     const from = (m.from.match(/^"?([^"<]+)"?\s*</) || [, m.from])[1].trim();
     const d = new Date(m.date); const isToday = d.toDateString() === new Date().toDateString();
     const when = isNaN(d) ? "" : isToday ? fmtTime(d) : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
     return `<li data-id="${esc(m.id)}" data-from="${esc(from)}" data-subject="${esc(m.subject)}">
-      <div class="from"><span dir="auto">${esc(from)}</span><time>${when}</time></div>
+      <div class="from"><span dir="auto">${esc(from)}${m.account ? `<span class="acct">${esc(m.account)}</span>` : ""}</span><time>${when}</time></div>
       <div class="subj" dir="auto">${esc(m.subject)}</div><div class="snip" dir="auto">${esc(m.snippet)}</div></li>`;
   }).join("");
   $$("#inbox li[data-id]").forEach((li) => li.addEventListener("click", () => {
@@ -1087,37 +1088,56 @@ async function loadGoogleStatus() {
   const el = $("#googleStatus");
   $("#googleSetup").classList.toggle("hidden", st.connected || st.client_secret_present);
   $("#googleReupload").classList.toggle("hidden", st.connected || !st.client_secret_present);
-  if (st.connected) el.innerHTML = `✓ Connected as <strong>${esc(st.email)}</strong>`;
+  const accs = st.accounts || [];
+  $("#googleAccounts").innerHTML = accs.map((a) => `<li data-email="${esc(a.email)}">
+      <span class="acc-email">${a.ok ? "✓" : "⚠"} ${esc(a.email)} ${a.default ? "<small>· default</small>" : ""}</span>
+      <button class="mini" data-acc-remove title="Disconnect this account">Disconnect</button>
+      <div class="acc-row"><input class="acc-label" value="${esc(a.label)}" placeholder="label, e.g. work" maxlength="30" aria-label="Label">
+        <button class="mini" data-acc-save>Save label</button>
+        ${a.default ? "" : `<button class="mini" data-acc-default>Make default</button>`}</div>
+      ${a.ok ? "" : `<div class="acc-err">Needs reconnecting: ${esc(a.error || "")}</div>`}</li>`).join("");
+  $$("#googleAccounts li").forEach((li) => {
+    const email = li.dataset.email;
+    $("[data-acc-save]", li).onclick = guard(async () => { await postJSON("/api/google/account", { email, label: $(".acc-label", li).value }); toast("Label saved."); refresh(true); });
+    const d = $("[data-acc-default]", li);
+    if (d) d.onclick = guard(async () => { await postJSON("/api/google/account", { email, make_default: true }); await loadGoogleStatus(); });
+    $("[data-acc-remove]", li).onclick = guard(async () => {
+      if (!confirm(`Disconnect ${email} from JARVIS?`)) return;
+      await postJSON("/api/google/disconnect", { email }); await loadGoogleStatus(); refresh(true);
+    });
+  });
+  if (st.connected && st.auth_running) el.innerHTML = "A Google sign-in page has opened — <strong>choose the other account</strong> (use “Use another account” if needed).";
+  else if (st.connected) el.innerHTML = accs.length > 1
+    ? `${accs.length} accounts connected. JARVIS reads all of them; new emails and events use the default unless you say e.g. “from my work email”.`
+    : "Connected. Have a work and a personal account? Press <strong>Add another Google account</strong>.";
   else if (st.auth_running) el.innerHTML = isDesktop
     ? "A Google sign-in page has opened in your web browser. Choose your account, press <strong>Continue</strong> on the “unverified app” notice, tick all boxes and allow."
     : "A Google sign-in page has opened <strong>on your computer's browser</strong> — finish signing in there.";
   else if (!st.client_secret_present) el.innerHTML = "One-time setup: Google needs you to create a private key for JARVIS (about 10 minutes). Follow the steps below.";
   else el.innerHTML = st.error ? `<span class="err">${esc(st.error)}</span>` : "Ready. Press <strong>Sign in with Google</strong>.";
   // the sign-in button is ALWAYS available (as "Try again" while a sign-in is pending)
-  $("#googleConnect").classList.toggle("hidden", st.connected || !st.client_secret_present);
-  $("#googleConnect").textContent = st.auth_running || st.error ? "Try again" : "Sign in with Google";
+  $("#googleConnect").classList.toggle("hidden", !st.client_secret_present);
+  $("#googleConnect").textContent = st.auth_running || (st.error && !st.connected) ? "Try again"
+    : st.connected ? "Add another Google account" : "Sign in with Google";
+  if (st.added && !st.auth_running && !state.lastAdded) { state.lastAdded = st.added; toast(`Connected ${st.added}.`); }
   $("#googleReopen").classList.toggle("hidden", !(st.auth_running && st.auth_url));
   $("#googleReopen").dataset.url = st.auth_url || "";
   $("#googleCancel").classList.toggle("hidden", !st.auth_running);
   $("#googleHelp").classList.toggle("hidden", st.connected || !st.client_secret_present || !(st.auth_running || st.error));
-  $("#googleDisconnect").classList.toggle("hidden", !st.connected);
   clearTimeout(googlePoll);
   if (st.auth_running) googlePoll = setTimeout(async () => {
     await loadGoogleStatus().catch(() => {});
-    if (!$("#googleConnect").classList.contains("hidden") || !$("#googleDisconnect").classList.contains("hidden")) refresh(true);
+    refresh(true);
   }, 2500);
 }
 $("#googleConnect").addEventListener("click", guard(async () => {
+  state.lastAdded = null;
   const r = await postJSON("/api/google/connect"); toast(r.message); await loadGoogleStatus();
 }));
 $("#googleCancel").addEventListener("click", guard(async () => { await postJSON("/api/google/cancel"); await loadGoogleStatus(); }));
 $("#googleReopen").addEventListener("click", guard(async () => {
   const url = $("#googleReopen").dataset.url; if (!url) return;
   if (isDesktop) await postJSON("/api/open-url", { url }); else window.open(url, "_blank");
-}));
-$("#googleDisconnect").addEventListener("click", guard(async () => {
-  if (!confirm("Disconnect your Google account from JARVIS?")) return;
-  await postJSON("/api/google/disconnect"); await loadGoogleStatus(); refresh(true);
 }));
 async function uploadCredentials(file) {
   if (!file) return;

@@ -253,6 +253,7 @@ def _google_overview() -> dict:
         out["tomorrow"] = g.list_events(start_date=tmr.isoformat(), end_date=tmr.isoformat(), max_results=10)
         out["emails"] = g.list_emails("in:inbox is:unread", max_results=8)
         out["unread"] = g.unread_count()
+        out["accounts"] = g.accounts()
         out["connected"] = True
     except g.GoogleNotConnected as e:
         out["error"] = str(e)
@@ -410,11 +411,26 @@ def google_cancel():
     return {"ok": True}
 
 
+class AccountBody(BaseModel):
+    email: str | None = None
+    label: str | None = None
+    make_default: bool = False
+
+
 @app.post("/api/google/disconnect")
-def google_disconnect():
-    g.disconnect()
+def google_disconnect(body: AccountBody | None = None):
+    g.disconnect(body.email if body else None)
     _overview_cache["t"] = 0
     return {"ok": True}
+
+
+@app.post("/api/google/account")
+def google_account(body: AccountBody):
+    if not body.email:
+        raise HTTPException(400, "email required")
+    g.update_account(body.email, body.label, body.make_default)
+    _overview_cache["t"] = 0
+    return {"ok": True, "accounts": g.accounts()}
 
 
 # ── live voice (phone-call mode) ──────────────────────────────

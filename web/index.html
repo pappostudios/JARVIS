@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
@@ -147,13 +147,14 @@
       <header class="panel-h"><h2>Settings</h2><button class="icon-btn" id="closeSettings" aria-label="Close">✕</button></header>
       <div class="drawer-body">
         <section>
-          <h3>Google account</h3>
+          <h3>Google accounts</h3>
           <p id="googleStatus" class="muted">Checking…</p>
+          <ul id="googleAccounts" class="accounts"></ul>
           <ol id="googleSetup" class="setup-steps hidden">
             <li><a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/projectcreate">Create a Google Cloud project</a> — name it <em>JARVIS</em>, press Create. (Sign in with the Google account whose Gmail and Calendar JARVIS should use.)</li>
             <li>Enable the <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com">Google Calendar API</a> and the <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/apis/library/gmail.googleapis.com">Gmail API</a> — press <em>Enable</em> on each (make sure the JARVIS project is selected at the top).</li>
             <li>Open <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/overview">Google Auth Platform</a> → <em>Get started</em>: app name <em>JARVIS</em>, your email, audience <em>External</em>, finish.</li>
-            <li>In <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/audience">Audience</a> → <em>Test users</em> → <em>Add users</em> → add your own Gmail address → Save.</li>
+            <li>In <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/audience">Audience</a> → <em>Test users</em> → <em>Add users</em> → add your own Gmail address <strong>and any other account you'll connect</strong> (e.g. your work email) → Save.</li>
             <li>In <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/clients/create">Clients → Create client</a>: type <strong>Desktop app</strong>, name <em>JARVIS</em>, Create → <strong>Download JSON</strong>.</li>
             <li>Upload that downloaded file here:
               <label class="btn primary file-btn">Upload credentials file<input type="file" id="credFile" accept=".json,application/json" hidden></label>
@@ -163,14 +164,13 @@
             <strong>What you'll see on Google's page:</strong>
             <ul>
               <li><em>“Google hasn't verified this app”</em> — normal for your private JARVIS. Click <strong>Advanced</strong> (or <strong>Continue</strong>) → <strong>Go to JARVIS (unsafe)</strong>, then tick <strong>all</strong> the boxes and press Continue.</li>
-              <li><em>“Access blocked: JARVIS has not completed the Google verification process”</em> or <em>Error 403: access_denied</em> — your Gmail isn't a test user yet. Open <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/audience">Audience</a> → <em>Test users</em> → <em>Add users</em> → your Gmail → Save, then press <strong>Try again</strong> below.</li>
+              <li><em>“Access blocked: JARVIS has not completed the Google verification process”</em> or <em>Error 403: access_denied</em> — the account you're signing in with isn't a test user yet. Open <a data-ext target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/audience">Audience</a> → <em>Test users</em> → <em>Add users</em> → your Gmail → Save, then press <strong>Try again</strong> below.</li>
             </ul>
           </div>
           <div class="row">
             <button class="btn primary" id="googleConnect">Sign in with Google</button>
             <button class="btn hidden" id="googleReopen">Open sign-in page again</button>
             <button class="btn hidden" id="googleCancel">Cancel</button>
-            <button class="btn" id="googleDisconnect">Disconnect</button>
             <label class="btn file-btn hidden" id="googleReupload">Replace credentials file<input type="file" id="credFile2" accept=".json,application/json" hidden></label>
           </div>
         </section>
@@ -258,6 +258,6 @@
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

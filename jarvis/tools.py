@@ -39,7 +39,13 @@ def _needs_confirmation(name: str, args: dict) -> bool:
 
 def _describe(name: str, a: dict) -> str:
     if name == "send_email":
-        return f"Send email to {', '.join(a.get('to', []))} — “{a.get('subject', '')}”\n\n{a.get('body', '')}"
+        frm = ""
+        if g._multi():
+            try:
+                frm = f" from {g._resolve(a.get('account'))}"
+            except Exception:  # noqa: BLE001
+                pass
+        return f"Send email{frm} to {', '.join(a.get('to', []))} — “{a.get('subject', '')}”\n\n{a.get('body', '')}"
     if name == "reply_to_email":
         who = "everyone" if a.get("reply_all") else "the sender"
         return f"Reply to {who} (email {a.get('message_id')}):\n\n{a.get('body', '')}"
@@ -60,12 +66,14 @@ def _enrich_summary(name: str, a: dict, summary: str) -> str:
     """Add human context (event title / email subject) where cheap to fetch."""
     try:
         if name == "delete_event":
-            ev = g._svc("calendar", "v3").events().get(calendarId="primary", eventId=a["event_id"]).execute()
+            email, raw = g._split(a["event_id"])
+            ev = g._svc("calendar", "v3", email).events().get(calendarId="primary", eventId=raw).execute()
             st = ev.get("start", {})
             return f"Delete “{ev.get('summary', '(no title)')}” on {st.get('dateTime') or st.get('date')}"
         if name == "reply_to_email":
             m = g.read_email(a["message_id"])
-            return f"Reply to {m['from']} — “{m['subject']}”\n\n{a.get('body', '')}"
+            via = f" (from {g._split(a['message_id'])[0]})" if g._multi() else ""
+            return f"Reply to {m['from']}{via} — “{m['subject']}”\n\n{a.get('body', '')}"
     except Exception:  # noqa: BLE001
         pass
     return summary

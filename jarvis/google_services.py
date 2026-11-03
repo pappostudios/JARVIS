@@ -14,6 +14,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr
+from pathlib import Path
 from typing import Any, Optional
 
 from . import config, db
@@ -28,56 +29,196 @@ class GoogleNotConnected(RuntimeError):
     pass
 
 
-# ── auth ──────────────────────────────────────────────────────
-_auth_state: dict[str, Any] = {"running": False, "error": None, "url": None, "attempt": 0}
+# ── accounts ──────────────────────────────────────────────────
+# Several Google accounts can be connected (e.g. personal + work). Each has its own token file in
+# data/google_accounts/<email>.json and an optional label. One account is the default for creating things.
+ACCOUNTS_DIR = config.DATA_DIR / "google_accounts"
+ACCOUNTS_META = config.DATA_DIR / "google_accounts.json"
+ID_SEP = "~"  # composite ids "<email>~<google id>" tell JARVIS which account an email/event belongs to
+
+_auth_state: dict[str, Any] = {"running": False, "error": None, "url": None, "attempt": 0, "added": None}
 _creds_lock = threading.Lock()
+_meta_lock = threading.RLock()
 
 
-def _creds():
+def _load_meta() -> dict:
+    import json
+
+    with _meta_lock:
+        if ACCOUNTS_META.exists():
+            try:
+                return json.loads(ACCOUNTS_META.read_text())
+            except Exception:  # noqa: BLE001
+                pass
+        return {"accounts": [], "default": None}
+
+
+def _save_meta(meta: dict) -> None:
+    import json
+
+    with _meta_lock:
+        ACCOUNTS_META.write_text(json.dumps(meta, indent=2))
+
+
+def _token_path(email: str) -> Path:
+    return ACCOUNTS_DIR / f"{email.lower()}.json"
+
+
+def _migrate_legacy() -> None:
+    """Older versions kept one account in data/token.json — move it into the accounts folder."""
+    legacy = config.GOOGLE_TOKEN
+    if not legacy.exists() or _load_meta()["accounts"]:
+        return
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+
+        creds = Credentials.from_authorized_user_file(str(legacy), SCOPES)
+        if not creds.valid and creds.expired and creds.refresh_token:
+            from google.auth.transport.requests import Request
+
+            creds.refresh(Request())
+        email = build("gmail", "v1", credentials=creds, cache_discovery=False).users().getProfile(
+            userId="me").execute()["emailAddress"]
+        _store_account(email, creds.to_json())
+        legacy.unlink(missing_ok=True)
+    except Exception as e:  # noqa: BLE001
+        print("[google] could not migrate the old sign-in:", e)
+
+
+def _store_account(email: str, token_json: str) -> None:
+    ACCOUNTS_DIR.mkdir(exist_ok=True)
+    _token_path(email).write_text(token_json)
+    with _meta_lock:
+        meta = _load_meta()
+        if not any(a["email"].lower() == email.lower() for a in meta["accounts"]):
+            label = "personal" if not meta["accounts"] and email.lower().endswith(("@gmail.com", "@googlemail.com")) \
+                else ("work" if meta["accounts"] and not email.lower().endswith("@gmail.com") else "")
+            meta["accounts"].append({"email": email, "label": label})
+        if not meta.get("default"):
+            meta["default"] = email
+        _save_meta(meta)
+
+
+def accounts() -> list[dict]:
+    """Connected accounts, default first: [{email, label, default}]."""
+    _migrate_legacy()
+    meta = _load_meta()
+    out = [{"email": a["email"], "label": a.get("label") or "", "default": a["email"] == meta.get("default")}
+           for a in meta["accounts"] if _token_path(a["email"]).exists()]
+    out.sort(key=lambda a: not a["default"])
+    return out
+
+
+def _multi() -> bool:
+    return len(accounts()) > 1
+
+
+def _name(email: str) -> str:
+    for a in accounts():
+        if a["email"] == email:
+            return a["label"] or a["email"]
+    return email
+
+
+def _resolve(account: Optional[str]) -> str:
+    """Account email for an email address, a label ("work"), part of either, or None (= default)."""
+    accs = accounts()
+    if not accs:
+        raise GoogleNotConnected(
+            "Google account is not connected yet. Open Settings in the dashboard and press 'Sign in with Google'.")
+    if not account or account.strip().lower() in ("default", "primary", "main"):
+        return accs[0]["email"]
+    q = account.strip().lower()
+    for a in accs:
+        if q in (a["email"].lower(), (a["label"] or "").lower()):
+            return a["email"]
+    for a in accs:
+        if q in a["email"].lower() or (a["label"] and q in a["label"].lower()):
+            return a["email"]
+    raise ValueError(f"No connected Google account matches '{account}'. Connected: "
+                     + ", ".join(f"{a['label'] or a['email']} ({a['email']})" for a in accs))
+
+
+def _targets(account: Optional[str]) -> list[str]:
+    """For reading: every account unless one is named."""
+    if not account or account.strip().lower() in ("all", "both", "every", "any"):
+        accs = accounts()
+        if not accs:
+            _resolve(None)  # raises GoogleNotConnected
+        return [a["email"] for a in accs]
+    return [_resolve(account)]
+
+
+def _cid(email: str, raw: str) -> str:
+    return f"{email}{ID_SEP}{raw}" if _multi() else raw
+
+
+def _split(item_id: str, account: Optional[str] = None) -> tuple[str, str]:
+    if ID_SEP in item_id:
+        email, raw = item_id.split(ID_SEP, 1)
+        return _resolve(email), raw
+    return _resolve(account), item_id
+
+
+def _creds(email: Optional[str] = None):
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
+    email = email or _resolve(None)
+    path = _token_path(email)
     with _creds_lock:
-        if not config.GOOGLE_TOKEN.exists():
-            raise GoogleNotConnected(
-                "Google account is not connected yet. Open Settings in the dashboard and press "
-                "'Connect Google', or run: python -m jarvis.google_services"
-            )
-        creds = Credentials.from_authorized_user_file(str(config.GOOGLE_TOKEN), SCOPES)
+        if not path.exists():
+            raise GoogleNotConnected(f"{email} is not connected. Reconnect it in Settings → Google accounts.")
+        creds = Credentials.from_authorized_user_file(str(path), SCOPES)
         if not creds.valid:
             if creds.expired and creds.refresh_token:
                 creds.refresh(Request())
-                config.GOOGLE_TOKEN.write_text(creds.to_json())
+                path.write_text(creds.to_json())
             else:
-                raise GoogleNotConnected("Google sign-in expired. Please reconnect Google in Settings.")
+                raise GoogleNotConnected(f"Google sign-in for {email} expired. Reconnect it in Settings.")
         return creds
 
 
-def _svc(name: str, version: str):
+def _svc(name: str, version: str, email: Optional[str] = None):
     from googleapiclient.discovery import build
 
     # A fresh client per call: httplib2 is not thread-safe and the dashboard + agent run concurrently.
-    return build(name, version, credentials=_creds(), cache_discovery=False)
+    return build(name, version, credentials=_creds(email), cache_discovery=False)
 
 
 def google_status() -> dict:
-    connected = False
-    email = None
-    token_error = None
-    if config.GOOGLE_TOKEN.exists():
+    accs = []
+    for a in accounts():
+        ok, err = True, None
         try:
-            email = _svc("gmail", "v1").users().getProfile(userId="me").execute().get("emailAddress")
-            connected = True
+            _svc("gmail", "v1", a["email"]).users().getProfile(userId="me").execute()
         except Exception as e:  # noqa: BLE001
-            token_error = str(e)
+            ok, err = False, str(e)[:200]
+        accs.append({**a, "ok": ok, "error": err})
+    default = next((a for a in accs if a["default"]), None)
     return {
-        "connected": connected,
-        "email": email,
+        "connected": any(a["ok"] for a in accs),
+        "email": default["email"] if default else None,
+        "accounts": accs,
         "client_secret_present": config.GOOGLE_CLIENT_SECRET.exists(),
         "auth_running": _auth_state["running"],
         "auth_url": _auth_state["url"] if _auth_state["running"] else None,
-        "error": _auth_state["error"] or token_error,
+        "added": _auth_state.get("added"),
+        "error": _auth_state["error"],
     }
+
+
+def update_account(email: str, label: Optional[str] = None, make_default: bool = False) -> None:
+    with _meta_lock:
+        meta = _load_meta()
+        for a in meta["accounts"]:
+            if a["email"].lower() == email.lower():
+                if label is not None:
+                    a["label"] = label.strip()[:30]
+                if make_default:
+                    meta["default"] = a["email"]
+        _save_meta(meta)
 
 
 _SUCCESS_PAGE = """<!doctype html><meta charset=utf-8><title>JARVIS</title>
@@ -169,14 +310,19 @@ def run_auth_flow(open_browser: bool = True, attempt: int | None = None) -> None
     if missing:
         raise PermissionError("Google sign-in worked, but not every permission box was ticked. Press 'Sign in with "
                               "Google' again and tick ALL the boxes (Calendar and Gmail) so JARVIS can help you.")
-    config.GOOGLE_TOKEN.write_text(flow.credentials.to_json())
+    from googleapiclient.discovery import build
+
+    email = build("gmail", "v1", credentials=flow.credentials, cache_discovery=False).users().getProfile(
+        userId="me").execute()["emailAddress"]
+    _store_account(email, flow.credentials.to_json())
+    _auth_state["added"] = email
 
 
 def start_auth_in_background() -> dict:
     """Start (or restart) Google sign-in. Pressing the button again always works."""
     _auth_state["attempt"] += 1
     attempt = _auth_state["attempt"]
-    _auth_state.update(running=True, error=None, url=None)  # set before the thread starts so status polls see it
+    _auth_state.update(running=True, error=None, url=None, added=None)  # set before the thread starts so status polls see it
 
     def _run():
         try:
@@ -197,7 +343,17 @@ def cancel_auth() -> None:
     _auth_state.update(running=False, url=None, error=None)
 
 
-def disconnect() -> None:
+def disconnect(email: Optional[str] = None) -> None:
+    """Forget one account (or all of them)."""
+    with _meta_lock:
+        meta = _load_meta()
+        targets = [a["email"] for a in meta["accounts"] if not email or a["email"].lower() == email.lower()]
+        for e in targets:
+            _token_path(e).unlink(missing_ok=True)
+        meta["accounts"] = [a for a in meta["accounts"] if a["email"] not in targets]
+        if meta.get("default") in targets:
+            meta["default"] = meta["accounts"][0]["email"] if meta["accounts"] else None
+        _save_meta(meta)
     config.GOOGLE_TOKEN.unlink(missing_ok=True)
 
 
@@ -267,14 +423,17 @@ def list_events(
     end_date: Optional[str] = None,
     search: Optional[str] = None,
     max_results: int = 30,
+    account: Optional[str] = None,
 ) -> list[dict]:
-    """Read the user's Google Calendar. Returns events with id, title, start, end, attendees, location.
+    """Read the user's Google Calendar(s). Returns events with id, title, start, end, attendees, location and
+    (when several accounts are connected) which account's calendar each event is on.
 
     Args:
         start_date: First day to include (YYYY-MM-DD) or an ISO datetime. Defaults to today.
         end_date: Last day to include (YYYY-MM-DD, inclusive) or an ISO datetime. Defaults to start_date.
         search: Optional free-text search (title, attendees, description).
         max_results: Maximum number of events.
+        account: Which Google account: "personal", "work", an email address, or omit for ALL connected accounts.
     """
     today = config.now().date()
     if start_date and not _is_date_only(start_date):
@@ -296,8 +455,39 @@ def list_events(
     )
     if search:
         params["q"] = search
-    items = _svc("calendar", "v3").events().list(**params).execute().get("items", [])
-    return [_fmt_event(e) for e in items if e.get("status") != "cancelled"]
+    out, failures = [], []
+    targets = _targets(account)
+    for email in targets:
+        try:
+            items = _svc("calendar", "v3", email).events().list(**params).execute().get("items", [])
+        except Exception as e:  # noqa: BLE001
+            if len(targets) == 1:
+                raise
+            failures.append(f"{_name(email)}: {e}")
+            continue
+        for e in items:
+            if e.get("status") != "cancelled":
+                ev = _fmt_event(e)
+                ev["id"] = _cid(email, ev["id"])
+                if _multi():
+                    ev["account"] = _name(email)
+                out.append(ev)
+    if failures and not out and len(failures) == len(targets):
+        raise GoogleNotConnected("Couldn't read any calendar: " + "; ".join(failures))
+    out.sort(key=lambda ev: _sort_key(ev.get("start")))
+    out = out[: max(1, int(max_results))]
+    if failures:
+        out.append({"note": "Some calendars could not be read", "errors": failures})
+    return out
+
+
+def _sort_key(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    try:
+        return _parse_dt(value if "T" in value else value + "T00:00").astimezone(config.local_tz()).isoformat()
+    except ValueError:
+        return value
 
 
 def create_event(
@@ -310,6 +500,7 @@ def create_event(
     attendees: Optional[list[str]] = None,
     add_google_meet: bool = False,
     reminder_minutes: Optional[int] = None,
+    account: Optional[str] = None,
 ) -> dict:
     """Create a calendar event or meeting. If attendees are given, Google sends them invitations.
     Use for meetings, appointments, reminders and focus/work blocks when planning the user's schedule.
@@ -324,7 +515,9 @@ def create_event(
         attendees: Email addresses to invite.
         add_google_meet: Attach a Google Meet video link.
         reminder_minutes: Popup reminder this many minutes before.
+        account: Which Google account to use: "personal", "work" or an email address. Omit for the default account.
     """
+    email = _resolve(account)
     s, e = _time_body(start, end, duration_minutes)
     body: dict[str, Any] = {"summary": title, "start": s, "end": e}
     if description:
@@ -341,8 +534,10 @@ def create_event(
             "createRequest": {"requestId": uuid.uuid4().hex, "conferenceSolutionKey": {"type": "hangoutsMeet"}}
         }
         kwargs["conferenceDataVersion"] = 1
-    created = _svc("calendar", "v3").events().insert(**kwargs).execute()
-    return {"created": True, **_fmt_event(created), "link": created.get("htmlLink")}
+    created = _svc("calendar", "v3", email).events().insert(**kwargs).execute()
+    ev = _fmt_event(created)
+    ev["id"] = _cid(email, ev["id"])
+    return {"created": True, **ev, "account": _name(email), "link": created.get("htmlLink")}
 
 
 def update_event(
@@ -367,7 +562,8 @@ def update_event(
         add_attendees: Emails to invite.
         remove_attendees: Emails to remove.
     """
-    svc = _svc("calendar", "v3")
+    email, event_id = _split(event_id)
+    svc = _svc("calendar", "v3", email)
     ev = svc.events().get(calendarId="primary", eventId=event_id).execute()
     if title is not None:
         ev["summary"] = title
@@ -397,7 +593,9 @@ def update_event(
         ev["attendees"] = attendees
     notify = "all" if ev.get("attendees") else "none"
     updated = svc.events().update(calendarId="primary", eventId=event_id, body=ev, sendUpdates=notify).execute()
-    return {"updated": True, **_fmt_event(updated)}
+    out = _fmt_event(updated)
+    out["id"] = _cid(email, out["id"])
+    return {"updated": True, **out}
 
 
 def delete_event(event_id: str, notify_attendees: bool = True) -> dict:
@@ -407,8 +605,9 @@ def delete_event(event_id: str, notify_attendees: bool = True) -> dict:
         event_id: Event id from list_events.
         notify_attendees: Email cancellation notices to attendees.
     """
-    _svc("calendar", "v3").events().delete(
-        calendarId="primary", eventId=event_id, sendUpdates="all" if notify_attendees else "none"
+    email, raw = _split(event_id)
+    _svc("calendar", "v3", email).events().delete(
+        calendarId="primary", eventId=raw, sendUpdates="all" if notify_attendees else "none"
     ).execute()
     return {"deleted": True, "event_id": event_id}
 
@@ -418,14 +617,17 @@ def find_free_slots(
     duration_minutes: int = 30,
     day_start: Optional[str] = None,
     day_end: Optional[str] = None,
+    account: Optional[str] = None,
 ) -> dict:
     """Find free time on a given day within working hours. Use before proposing meeting times or planning the day.
+    Checks every connected calendar (personal and work) unless one account is named.
 
     Args:
         day: Day as YYYY-MM-DD (defaults to today).
         duration_minutes: Minimum length of a free slot.
         day_start: Start of working hours "HH:MM" (defaults to the user's setting).
         day_end: End of working hours "HH:MM" (defaults to the user's setting).
+        account: Which Google account: "personal", "work", an email address, or omit for ALL connected accounts.
     """
     settings = db.get_settings()
     d = date.fromisoformat(day) if day else config.now().date()
@@ -442,13 +644,13 @@ def find_free_slots(
     if win_start >= win_end:
         return {"date": d.isoformat(), "free_slots": [], "note": "Working hours are over for that day."}
 
-    fb = _svc("calendar", "v3").freebusy().query(
-        body={"timeMin": win_start.isoformat(), "timeMax": win_end.isoformat(), "items": [{"id": "primary"}]}
-    ).execute()
-    busy = sorted(
-        (_parse_dt(b["start"]).astimezone(tz), _parse_dt(b["end"]).astimezone(tz))
-        for b in fb["calendars"]["primary"].get("busy", [])
-    )
+    busy_raw = []
+    for email in _targets(account):
+        fb = _svc("calendar", "v3", email).freebusy().query(
+            body={"timeMin": win_start.isoformat(), "timeMax": win_end.isoformat(), "items": [{"id": "primary"}]}
+        ).execute()
+        busy_raw += fb["calendars"]["primary"].get("busy", [])
+    busy = sorted((_parse_dt(b["start"]).astimezone(tz), _parse_dt(b["end"]).astimezone(tz)) for b in busy_raw)
     slots, cursor = [], win_start
     for b_start, b_end in busy:
         if b_start > cursor and (b_start - cursor) >= timedelta(minutes=duration_minutes):
@@ -518,43 +720,61 @@ def _summary(msg: dict) -> dict:
         "snippet": html.unescape(msg.get("snippet", "")),
         "unread": "UNREAD" in msg.get("labelIds", []),
         "important": "IMPORTANT" in msg.get("labelIds", []),
+        "received_ms": int(msg.get("internalDate") or 0),
     }
 
 
-def _my_address() -> str:
-    return _svc("gmail", "v1").users().getProfile(userId="me").execute().get("emailAddress", "")
-
-
-def _send_raw(msg: EmailMessage, thread_id: Optional[str] = None, draft: bool = False) -> dict:
+def _send_raw(msg: EmailMessage, email: str, thread_id: Optional[str] = None, draft: bool = False) -> dict:
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     body: dict[str, Any] = {"raw": raw}
     if thread_id:
         body["threadId"] = thread_id
-    users = _svc("gmail", "v1").users()
+    users = _svc("gmail", "v1", email).users()
     if draft:
         r = users.drafts().create(userId="me", body={"message": body}).execute()
-        return {"draft_created": True, "draft_id": r.get("id")}
+        return {"draft_created": True, "draft_id": r.get("id"), "from_account": email}
     r = users.messages().send(userId="me", body=body).execute()
-    return {"sent": True, "message_id": r.get("id")}
+    return {"sent": True, "message_id": _cid(email, r.get("id")), "from_account": email}
 
 
 # ── gmail tools ───────────────────────────────────────────────
-def list_emails(query: str = "in:inbox is:unread", max_results: int = 10) -> list[dict]:
-    """Search / list emails in Gmail. Returns sender, subject, date, snippet and id (no full body).
+def list_emails(query: str = "in:inbox is:unread", max_results: int = 10, account: Optional[str] = None) -> list[dict]:
+    """Search / list emails in Gmail (all connected inboxes unless one account is named). Returns sender, subject,
+    date, snippet, id and — with several accounts — which inbox each email is in. No full body.
 
     Args:
         query: Gmail search syntax, e.g. "in:inbox is:unread", "from:alice newer_than:7d", "subject:invoice",
             "is:important newer_than:2d". Use "in:inbox" for recent inbox mail.
         max_results: How many emails (max 50).
+        account: Which Google account: "personal", "work", an email address, or omit for ALL connected accounts.
     """
-    users = _svc("gmail", "v1").users()
-    ids = users.messages().list(userId="me", q=query, maxResults=max(1, min(int(max_results), 50))).execute()
-    out = []
-    for m in ids.get("messages", []):
-        msg = users.messages().get(
-            userId="me", id=m["id"], format="metadata", metadataHeaders=["From", "To", "Subject", "Date"]
-        ).execute()
-        out.append(_summary(msg))
+    n = max(1, min(int(max_results), 50))
+    out, failures = [], []
+    targets = _targets(account)
+    for email in targets:
+        users = _svc("gmail", "v1", email).users()
+        try:
+            ids = users.messages().list(userId="me", q=query, maxResults=n).execute()
+        except Exception as e:  # noqa: BLE001
+            if len(targets) == 1:
+                raise
+            failures.append(f"{_name(email)}: {e}")
+            continue
+        for m in ids.get("messages", []):
+            msg = users.messages().get(
+                userId="me", id=m["id"], format="metadata", metadataHeaders=["From", "To", "Subject", "Date"]
+            ).execute()
+            item = _summary(msg)
+            item["id"] = _cid(email, item["id"])
+            if _multi():
+                item["account"] = _name(email)
+            out.append(item)
+    if failures and not out and len(failures) == len(targets):
+        raise GoogleNotConnected("Couldn't read any inbox: " + "; ".join(failures))
+    out.sort(key=lambda m: -m["received_ms"])
+    out = out[:n]
+    if failures:
+        out.append({"note": "Some inboxes could not be read", "errors": failures})
     return out
 
 
@@ -565,9 +785,13 @@ def read_email(message_id: str, mark_as_read: bool = False) -> dict:
         message_id: Email id from list_emails.
         mark_as_read: Also mark it as read.
     """
-    users = _svc("gmail", "v1").users()
-    msg = users.messages().get(userId="me", id=message_id, format="full").execute()
+    email, raw_id = _split(message_id)
+    users = _svc("gmail", "v1", email).users()
+    msg = users.messages().get(userId="me", id=raw_id, format="full").execute()
     out = _summary(msg)
+    out["id"] = message_id
+    if _multi():
+        out["account"] = _name(email)
     h = _headers(msg)
     if h.get("cc"):
         out["cc"] = h["cc"]
@@ -585,7 +809,7 @@ def read_email(message_id: str, mark_as_read: bool = False) -> dict:
     if attachments:
         out["attachments"] = attachments
     if mark_as_read and out["unread"]:
-        users.messages().modify(userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]}).execute()
+        users.messages().modify(userId="me", id=raw_id, body={"removeLabelIds": ["UNREAD"]}).execute()
     return out
 
 
@@ -595,8 +819,10 @@ def send_email(
     body: str,
     cc: Optional[list[str]] = None,
     bcc: Optional[list[str]] = None,
+    account: Optional[str] = None,
 ) -> dict:
-    """Send a NEW email from the user's Gmail account (plain text). Sign off with the user's name.
+    """Send a NEW email from the user's Gmail (plain text). Sign off with the user's name. With several accounts,
+    send work matters from the work account and personal matters from the personal one.
 
     Args:
         to: Recipient email addresses.
@@ -604,7 +830,9 @@ def send_email(
         body: Plain-text body.
         cc: CC addresses.
         bcc: BCC addresses.
+        account: Which Google account to use: "personal", "work" or an email address. Omit for the default account.
     """
+    email = _resolve(account)
     msg = EmailMessage()
     msg["To"] = ", ".join(to)
     if cc:
@@ -613,17 +841,18 @@ def send_email(
         msg["Bcc"] = ", ".join(bcc)
     msg["Subject"] = subject
     msg.set_content(body)
-    return _send_raw(msg)
+    return _send_raw(msg, email)
 
 
-def _build_reply(message_id: str, body: str, reply_all: bool) -> tuple[EmailMessage, str]:
-    users = _svc("gmail", "v1").users()
+def _build_reply(message_id: str, body: str, reply_all: bool) -> tuple[EmailMessage, str, str]:
+    email, message_id = _split(message_id)
+    users = _svc("gmail", "v1", email).users()
     orig = users.messages().get(
         userId="me", id=message_id, format="metadata",
         metadataHeaders=["From", "To", "Cc", "Subject", "Message-ID", "References", "Reply-To"],
     ).execute()
     h = _headers(orig)
-    me = _my_address().lower()
+    me = email.lower()
     sender = h.get("reply-to") or h.get("from", "")
     to_addrs = [parseaddr(sender)[1]]
     cc_addrs: list[str] = []
@@ -642,7 +871,7 @@ def _build_reply(message_id: str, body: str, reply_all: bool) -> tuple[EmailMess
         msg["In-Reply-To"] = h["message-id"]
         msg["References"] = (h.get("references", "") + " " + h["message-id"]).strip()
     msg.set_content(body)
-    return msg, orig.get("threadId")
+    return msg, orig.get("threadId"), email
 
 
 def reply_to_email(message_id: str, body: str, reply_all: bool = False) -> dict:
@@ -653,8 +882,8 @@ def reply_to_email(message_id: str, body: str, reply_all: bool = False) -> dict:
         body: Plain-text reply body (no need to quote the original).
         reply_all: Reply to everyone on the email instead of only the sender.
     """
-    msg, thread_id = _build_reply(message_id, body, reply_all)
-    return _send_raw(msg, thread_id)
+    msg, thread_id, email = _build_reply(message_id, body, reply_all)
+    return _send_raw(msg, email, thread_id)  # replies always go out from the account that received the email
 
 
 def create_draft(
@@ -663,6 +892,7 @@ def create_draft(
     subject: str = "",
     reply_to_message_id: Optional[str] = None,
     reply_all: bool = False,
+    account: Optional[str] = None,
 ) -> dict:
     """Save an email as a Gmail draft (not sent). Use when the user wants to review before sending.
     For a reply draft pass reply_to_message_id instead of to/subject.
@@ -673,15 +903,16 @@ def create_draft(
         subject: Subject (new email only).
         reply_to_message_id: Make it a reply draft to this email id.
         reply_all: For reply drafts, include everyone.
+        account: Which Google account to use: "personal", "work" or an email address. Omit for the default account.
     """
     if reply_to_message_id:
-        msg, thread_id = _build_reply(reply_to_message_id, body, reply_all)
-        return _send_raw(msg, thread_id, draft=True)
+        msg, thread_id, email = _build_reply(reply_to_message_id, body, reply_all)
+        return _send_raw(msg, email, thread_id, draft=True)
     msg = EmailMessage()
     msg["To"] = ", ".join(to or [])
     msg["Subject"] = subject
     msg.set_content(body)
-    return _send_raw(msg, draft=True)
+    return _send_raw(msg, _resolve(account), draft=True)
 
 
 def mark_emails_read(message_ids: list[str]) -> dict:
@@ -690,10 +921,18 @@ def mark_emails_read(message_ids: list[str]) -> dict:
     Args:
         message_ids: Email ids.
     """
-    _svc("gmail", "v1").users().messages().batchModify(
-        userId="me", body={"ids": message_ids, "removeLabelIds": ["UNREAD"]}
-    ).execute()
+    for email, ids in _group_ids(message_ids).items():
+        _svc("gmail", "v1", email).users().messages().batchModify(
+            userId="me", body={"ids": ids, "removeLabelIds": ["UNREAD"]}).execute()
     return {"marked_read": len(message_ids)}
+
+
+def _group_ids(message_ids: list[str]) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    for mid in message_ids:
+        email, raw = _split(mid)
+        groups.setdefault(email, []).append(raw)
+    return groups
 
 
 def archive_emails(message_ids: list[str]) -> dict:
@@ -702,18 +941,24 @@ def archive_emails(message_ids: list[str]) -> dict:
     Args:
         message_ids: Email ids.
     """
-    _svc("gmail", "v1").users().messages().batchModify(
-        userId="me", body={"ids": message_ids, "removeLabelIds": ["INBOX"]}
-    ).execute()
+    for email, ids in _group_ids(message_ids).items():
+        _svc("gmail", "v1", email).users().messages().batchModify(
+            userId="me", body={"ids": ids, "removeLabelIds": ["INBOX"]}).execute()
     return {"archived": len(message_ids)}
 
 
 def unread_count() -> int:
-    r = _svc("gmail", "v1").users().labels().get(userId="me", id="INBOX").execute()
-    return int(r.get("messagesUnread", 0))
+    total = 0
+    for email in _targets(None):
+        try:
+            r = _svc("gmail", "v1", email).users().labels().get(userId="me", id="INBOX").execute()
+            total += int(r.get("messagesUnread", 0))
+        except Exception:  # noqa: BLE001
+            pass
+    return total
 
 
 if __name__ == "__main__":
     print("Opening Google sign-in in your browser…")
     run_auth_flow(attempt=None)
-    print("✓ Google connected. Token saved to", config.GOOGLE_TOKEN)
+    print("✓ Google connected:", ", ".join(a["email"] for a in accounts()))
