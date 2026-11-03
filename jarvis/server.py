@@ -331,6 +331,8 @@ def get_settings():
 
 @app.post("/api/settings")
 def save_settings(values: dict[str, Any]):
+    if values.get("model") and values.get("model") != db.get_setting("model"):
+        jarvis._cooldown.clear()  # a newly chosen model gets a fresh chance
     return db.set_settings(values)
 
 

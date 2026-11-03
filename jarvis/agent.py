@@ -27,7 +27,7 @@ _THINKING = {
 }
 MAX_HISTORY_CONTENTS = 40
 # Last-resort backups, tried after the automatically chosen models.
-FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"]
+FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
 OVERLOAD_COOLDOWN_S = 600    # skip a model that returned a server error for 10 minutes
 TIMEOUT_COOLDOWN_S = 1800    # skip a model that didn't answer in time for 30 minutes
 _EXCLUDE = ("lite", "tts", "image", "live", "audio", "embedding", "exp", "preview", "thinking", "latest",
@@ -204,7 +204,11 @@ class Jarvis:
             order.append(chosen)
         elif config.GEMINI_MODEL and config.GEMINI_MODEL not in ("auto", "gemini-flash-latest"):
             order.append(config.GEMINI_MODEL)  # explicitly pinned in .env
-        order += self._stable_flash()[:2]
+        stable = self._stable_flash()
+        modern = [m for m in stable if self._version(m)[0] >= 3]
+        order += modern[:2]                        # newest Gemini 3.x Flash models first
+        order += ["gemini-flash-latest"]           # Google's alias for its newest Flash
+        order += [m for m in stable if m not in modern][:1]
         order += FALLBACK_MODELS
         seen: list[str] = []
         avail = set(self.available_models())
@@ -284,7 +288,8 @@ class Jarvis:
                     system_instruction=_system_prompt(),
                     tools=[types.Tool(function_declarations=self._declarations())],
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                    temperature=0.6,
+                    # No temperature override: Gemini 3 models are tuned for the default (1.0) and can loop
+                    # or stall when it's lowered.
                 )
                 t_start = time.time()
                 reply = ""
