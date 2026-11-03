@@ -434,9 +434,12 @@ function addMessage(role, text, extra = {}) {
     rp.onclick = () => speak(text);
     el.lastElementChild?.appendChild(rp);
   }
-  if (extra.tools?.length) {
+  const meta = [];
+  if (extra.model) meta.push(`${extra.model}${extra.seconds != null ? ` · ${extra.seconds}s` : ""}`);
+  if (extra.tools?.length) meta.push("⟶ " + [...new Set(extra.tools)].join(" · "));
+  if (meta.length) {
     const tl = document.createElement("div"); tl.className = "tools";
-    tl.textContent = "⟶ " + [...new Set(extra.tools)].join(" · ");
+    tl.textContent = meta.join("   ");
     el.appendChild(tl);
   }
   chatEl.appendChild(el);
@@ -487,7 +490,7 @@ async function send(text) {
   if (reply.error) {
     addMessage("jarvis", "⚠ " + reply.text, { error: true }); core.set("idle");
   } else {
-    addMessage("jarvis", reply.text, { tools: reply.tools });
+    addMessage("jarvis", reply.text, { tools: reply.tools, model: reply.model, seconds: reply.seconds });
     if (state.settings.auto_speak !== "false") speak(reply.text); else core.set("idle");
     if (reply.tools?.length) refresh(true);
   }
@@ -708,7 +711,7 @@ function checkReminders() {
 setInterval(checkReminders, 30000);
 
 /* ───────────────────────── settings ───────────────────────── */
-const SETTING_FIELDS = ["thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
+const SETTING_FIELDS = ["model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
 
 async function openSettings() {
   $("#settings").classList.remove("hidden");
@@ -720,7 +723,15 @@ async function openSettings() {
     if (el.type === "checkbox") el.checked = data.settings[k] === "true"; else el.value = data.settings[k] ?? "";
   }
   syncVoiceRows();
-  $("#modelInfo").textContent = `Brain: ${data.model}`;
+  $("#modelInfo").textContent = "Checking which Gemini models your key can use…";
+  getJSON("/api/models").then((m) => {
+    const sel = $("#s_model");
+    sel.innerHTML = `<option value="auto">Automatic — fastest reliable model (recommended)</option>` +
+      m.available.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    if (m.setting !== "auto" && !m.available.includes(m.setting)) sel.insertAdjacentHTML("beforeend", `<option value="${esc(m.setting)}">${esc(m.setting)}</option>`);
+    sel.value = m.setting;
+    $("#modelInfo").innerHTML = `Last answer came from <strong>${esc(m.last_used || "—")}</strong>. Automatic order: ${esc(m.order.slice(0, 4).join(" → "))}`;
+  }).catch((e) => { $("#modelInfo").textContent = e.message; });
   $("#memories").innerHTML = data.memories.map((m) => `<li><span>${esc(m.fact)}</span><button data-mem="${m.id}" aria-label="Forget">✕</button></li>`).join("") || '<li class="muted">Nothing yet — say “Jarvis, remember that…”.</li>';
   $$("[data-mem]").forEach((b) => b.onclick = async () => { await api(`/api/memories/${b.dataset.mem}`, { method: "DELETE" }); b.parentElement.remove(); });
   loadGoogleStatus();

@@ -341,9 +341,13 @@ def delete_memory(memory_id: int):
 
 @app.get("/api/models")
 def models():
-    names = voice.available_models()
-    return {"current": jarvis.model, "tts": voice.tts_model() if names else None,
-            "available": [n for n in names if "gemini" in n]}
+    try:
+        avail = jarvis.available_models()
+        order = jarvis.model_order()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Couldn't list Gemini models: {e}") from e
+    return {"last_used": jarvis.last_model, "order": order, "available": avail,
+            "setting": db.get_setting("model") or "auto"}
 
 
 @app.get("/api/google/status")

@@ -14,7 +14,9 @@ from . import config, db, projects, tools
 log = logging.getLogger("jarvis.agent")
 
 MAX_TOOL_ROUNDS = 10
-REQUEST_TIMEOUT_MS = 75_000
+REQUEST_TIMEOUT_MS = 90_000
+# How long to wait for the FIRST model before switching to a backup (per response-speed setting).
+FIRST_TRY_TIMEOUT_S = {"fast": 20, "balanced": 40, "deep": 90}
 
 # "Thinking" = how long Gemini reasons before answering. Newer models use levels, older ones a token budget.
 _THINKING = {
@@ -24,9 +26,12 @@ _THINKING = {
     "deep": [types.ThinkingConfig(thinking_level="HIGH"), types.ThinkingConfig(thinking_budget=-1)],
 }
 MAX_HISTORY_CONTENTS = 40
-# Tried in order when the main model is overloaded (5xx) or unavailable to the key (404).
-FALLBACK_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"]
-OVERLOAD_COOLDOWN_S = 300  # skip an overloaded model for 5 minutes instead of waiting on it every turn
+# Last-resort backups, tried after the automatically chosen models.
+FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"]
+OVERLOAD_COOLDOWN_S = 600    # skip a model that returned a server error for 10 minutes
+TIMEOUT_COOLDOWN_S = 1800    # skip a model that didn't answer in time for 30 minutes
+_EXCLUDE = ("lite", "tts", "image", "live", "audio", "embedding", "exp", "preview", "thinking", "latest",
+            "native", "robotics", "computer", "learnlm", "gemma", "aqa", "veo", "imagen", "nano")
 
 PERSONA = """You are J.A.R.V.I.S. — "Just A Rather Very Intelligent System" — a refined British AI personal
 assistant and chief of staff. You speak like a well-educated Englishman: composed, warm, quietly witty, impeccably
@@ -106,6 +111,8 @@ class Jarvis:
         self._decls: list[types.FunctionDeclaration] | None = None
         self._thinking_ok: dict[tuple[str, str], int] = {}
         self._cooldown: dict[str, float] = {}
+        self._available: list[str] | None = None
+        self.last_model: str | None = None
         self._restore_history()
 
     # ── setup ──
@@ -115,10 +122,9 @@ class Jarvis:
                 raise RuntimeError("GEMINI_API_KEY is missing. Add it to the .env file and restart JARVIS.")
             self.client = genai.Client(
                 api_key=config.GEMINI_API_KEY,
-                http_options=types.HttpOptions(
-                    timeout=REQUEST_TIMEOUT_MS,
-                    retry_options=types.HttpRetryOptions(attempts=2, initial_delay=1.0, max_delay=4.0),
-                ),
+                # no hidden retries: JARVIS switches to a backup model itself, which is much faster
+                http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS,
+                                               retry_options=types.HttpRetryOptions(attempts=1)),
             )
         return self.client
 
@@ -159,17 +165,69 @@ class Jarvis:
                 self.history = self.history[i:]
                 return
 
+    # ── model selection ──
+    def available_models(self) -> list[str]:
+        """Chat-capable Gemini models this API key can use (cached)."""
+        if self._available is None:
+            try:
+                names = []
+                for m in self._ensure_client().models.list():
+                    actions = m.supported_actions or []
+                    if actions and "generateContent" not in actions:
+                        continue
+                    n = (m.name or "").removeprefix("models/")
+                    if n.startswith("gemini") and not any(x in n for x in ("tts", "image", "embedding", "live", "audio")):
+                        names.append(n)
+                self._available = sorted(set(names))
+                log.info("models available to this key: %s", ", ".join(self._available))
+            except Exception as e:  # noqa: BLE001
+                log.warning("could not list models: %r", e)
+                return []
+        return self._available
+
+    @staticmethod
+    def _version(name: str) -> tuple:
+        import re
+
+        nums = re.findall(r"(\d+(?:\.\d+)?)", name)
+        return (float(nums[0]) if nums else 0.0, "pro" not in name)
+
+    def _stable_flash(self) -> list[str]:
+        """Stable (non-preview) Flash models, newest first."""
+        cands = [n for n in self.available_models() if "flash" in n and not any(x in n for x in _EXCLUDE)]
+        return sorted(cands, key=self._version, reverse=True)
+
+    def model_order(self) -> list[str]:
+        chosen = (db.get_setting("model") or "auto").strip()
+        order: list[str] = []
+        if chosen and chosen != "auto":
+            order.append(chosen)
+        elif config.GEMINI_MODEL and config.GEMINI_MODEL not in ("auto", "gemini-flash-latest"):
+            order.append(config.GEMINI_MODEL)  # explicitly pinned in .env
+        order += self._stable_flash()[:2]
+        order += FALLBACK_MODELS
+        seen: list[str] = []
+        avail = set(self.available_models())
+        for m in order:
+            # skip names the key definitely doesn't have (aliases like *-latest may not be listed, keep those)
+            if m not in seen and (not avail or m in avail or "latest" in m):
+                seen.append(m)
+        return seen
+
     def _generate(self, config_: types.GenerateContentConfig) -> types.GenerateContentResponse:
         client = self._ensure_client()
-        ordered = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
+        ordered = self.model_order()
         now = time.time()
         models = [m for m in ordered if self._cooldown.get(m, 0) < now] or ordered
         last_err: Exception | None = None
         overloaded: list[str] = []
         level = db.get_setting("thinking") or "fast"
-        for model in models:
+        for i, model in enumerate(models):
             thinking: list[types.ThinkingConfig | None] = list(_THINKING.get(level, _THINKING["fast"])) + [None]
             t_idx = self._thinking_ok.get((model, level), 0)
+            wait_s = FIRST_TRY_TIMEOUT_S.get(level, 20) if i == 0 else 60
+            config_.http_options = types.HttpOptions(timeout=wait_s * 1000,
+                                                     retry_options=types.HttpRetryOptions(attempts=1))
             while t_idx < len(thinking):
                 config_.thinking_config = thinking[t_idx]
                 t0 = time.time()
@@ -178,9 +236,7 @@ class Jarvis:
                     log.info("gemini %s ok in %.1fs (thinking=%s)", model, time.time() - t0,
                              thinking[t_idx].model_dump(exclude_none=True) if thinking[t_idx] else "default")
                     self._thinking_ok[(model, level)] = t_idx  # remember the form this model accepts
-                    if model != self.model and not overloaded:
-                        log.warning("model '%s' unavailable, switched to '%s'", self.model, model)
-                        self.model = model
+                    self.last_model = self.model = model
                     return resp
                 except errors.ClientError as e:
                     last_err = e
@@ -188,7 +244,8 @@ class Jarvis:
                     if e.code == 400 and "think" in str(e).lower():
                         t_idx += 1  # this model doesn't accept that thinking setting; try the next form
                         continue
-                    if e.code == 404:
+                    if e.code in (404, 403) or (e.code == 400 and "model" in str(e).lower()):
+                        self._cooldown[model] = time.time() + 24 * 3600
                         break  # model not available to this key: try the next model
                     if e.code == 429:
                         raise RuntimeError(
@@ -198,14 +255,16 @@ class Jarvis:
                 except errors.ServerError as e:
                     last_err = e
                     log.warning("gemini %s server error %s after %.1fs: %s", model, e.code, time.time() - t0, str(e)[:300])
-                    self._cooldown[model] = time.time() + OVERLOAD_COOLDOWN_S
-                    overloaded.append(f"{model} ({e.code})")
+                    slow = e.code == 504
+                    self._cooldown[model] = time.time() + (TIMEOUT_COOLDOWN_S if slow else OVERLOAD_COOLDOWN_S)
+                    overloaded.append(f"{model} ({'too slow' if slow else e.code})")
                     break  # move straight on to the next model
                 except Exception as e:  # noqa: BLE001  (timeouts, network)
                     log.warning("gemini %s failed after %.1fs: %r", model, time.time() - t0, e)
                     if "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower():
-                        raise RuntimeError("Gemini took too long to answer. Please try again "
-                                           "(if this keeps happening, set Settings → Response speed to Fast).") from e
+                        self._cooldown[model] = time.time() + TIMEOUT_COOLDOWN_S
+                        overloaded.append(f"{model} (too slow)")
+                        break  # try the next model
                     raise RuntimeError(f"Couldn't reach Gemini: {e}") from e
         if overloaded:
             raise RuntimeError("Google's Gemini servers are overloaded right now — every model I tried failed: "
@@ -255,7 +314,8 @@ class Jarvis:
                 db.log_message("jarvis", reply)
                 log.info("turn done in %.1fs, tools=%s", time.time() - t_start, used)
                 self._trim_history()
-                yield {"type": "reply", "text": reply, "tools": used}
+                yield {"type": "reply", "text": reply, "tools": used, "model": self.last_model,
+                       "seconds": round(time.time() - t_start, 1)}
             except Exception as e:  # noqa: BLE001
                 # drop the dangling turn so the conversation stays valid
                 while self.history and not (self.history[-1].role == "user" and self.history[-1].parts
