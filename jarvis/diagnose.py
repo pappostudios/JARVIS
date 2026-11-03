@@ -50,13 +50,16 @@ def run() -> dict:
                   "detail": ("API key present" if config.GEMINI_API_KEY else "GEMINI_API_KEY missing in .env")
                   + (f"; proxy {proxy}" if proxy else "; no proxy")})
     steps.append(_step("Network: IPv4 connection to Google", lambda: _connect(socket.AF_INET), 12))
-    steps.append(_step("Network: IPv6 connection to Google", lambda: _connect(socket.AF_INET6), 12))
+    v6 = _step("Network: IPv6 connection to Google (optional)", lambda: _connect(socket.AF_INET6), 12)
+    if not v6["ok"]:
+        v6.update(ok=True, detail="Not available on this network — that's fine, IPv4 is used.")
+    steps.append(v6)
 
     client = jarvis._ensure_client()
     jarvis._available = None
     steps.append(_step("API key: list models", lambda: f"{len(jarvis.available_models())} chat models available", 20))
 
-    order = jarvis.model_order()[:4]
+    order = jarvis.model_order()[:6]
     simple_cfg = types.GenerateContentConfig(http_options=types.HttpOptions(timeout=22000))
     working = None
     for m in order:

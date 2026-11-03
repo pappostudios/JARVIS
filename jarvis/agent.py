@@ -32,7 +32,8 @@ _THINKING = {
 }
 MAX_HISTORY_CONTENTS = 40
 # Last-resort backups, tried after the automatically chosen models.
-FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+FALLBACK_MODELS = ["gemini-flash-lite-latest"]
+QUOTA_COOLDOWN_S = 3600      # skip a model whose quota ran out for an hour (unless Google says sooner)
 OVERLOAD_COOLDOWN_S = 600    # skip a model that returned a server error for 10 minutes
 TIMEOUT_COOLDOWN_S = 1800    # skip a model that didn't answer in time for 30 minutes
 _EXCLUDE = ("lite", "tts", "image", "live", "audio", "embedding", "exp", "preview", "thinking", "latest",
@@ -105,6 +106,14 @@ def _system_prompt() -> str:
         parts.append("Actions awaiting the user's approval:\n" + "\n".join(
             f"- action_id {a['id']}: {a['summary'][:300]}" for a in pend))
     return "\n".join(parts)
+
+
+def _retry_delay(e: Exception) -> float | None:
+    """Seconds Google asks us to wait (RetryInfo.retryDelay), if given."""
+    import re
+
+    m = re.search(r"retryDelay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s", str(getattr(e, "details", "")) + str(e))
+    return float(m.group(1)) if m else None
 
 
 class Jarvis:
@@ -213,7 +222,11 @@ class Jarvis:
         modern = [m for m in stable if self._version(m)[0] >= 3]
         order += modern[:2]                        # newest Gemini 3.x Flash models first
         order += ["gemini-flash-latest"]           # Google's alias for its newest Flash
-        order += [m for m in stable if m not in modern][:1]
+        # Flash-Lite: fast, and usually has a separate (bigger) free quota — the best backup
+        lite = sorted((n for n in self.available_models() if "flash-lite" in n
+                       and not any(x in n for x in _EXCLUDE if x != "lite") and self._version(n)[0] >= 3),
+                      key=self._version, reverse=True)
+        order += lite[:2]
         order += FALLBACK_MODELS
         seen: list[str] = []
         avail = set(self.available_models())
@@ -230,6 +243,7 @@ class Jarvis:
         models = [m for m in ordered if self._cooldown.get(m, 0) < now] or ordered
         last_err: Exception | None = None
         overloaded: list[str] = []
+        quota: list[str] = []
         level = db.get_setting("thinking") or "fast"
         started = time.time()
         budget = TURN_BUDGET_S.get(level, 60)
@@ -265,9 +279,11 @@ class Jarvis:
                         self._cooldown[model] = time.time() + 24 * 3600
                         break  # model not available to this key: try the next model
                     if e.code == 429:
-                        raise RuntimeError(
-                            "Gemini says the usage limit was reached (429). On the free tier wait a minute and try "
-                            "again, or enable billing for your key at aistudio.google.com.") from e
+                        # quota is per model: park this one and try the next
+                        delay = _retry_delay(e)
+                        self._cooldown[model] = time.time() + (delay if delay and delay <= 300 else QUOTA_COOLDOWN_S)
+                        quota.append(model)
+                        break
                     raise
                 except errors.ServerError as e:
                     last_err = e
@@ -288,6 +304,13 @@ class Jarvis:
                         overloaded.append(f"{model} (too slow)")
                         break  # try the next model
                     raise RuntimeError(f"Couldn't reach Gemini: {e}") from e
+        if quota and not overloaded:
+            raise RuntimeError(
+                "Your Gemini free-tier quota is used up for every model I can use (" + ", ".join(quota) + "). "
+                "It resets daily — or, to remove the limits, enable billing for your API key at "
+                "aistudio.google.com (Get API key → Set up billing). Personal use typically costs a few dollars a month.")
+        if quota:
+            overloaded += [f"{m} (quota used up)" for m in quota]
         if overloaded:
             raise RuntimeError("I couldn't get an answer from Gemini — " + "; ".join(overloaded) +
                                ". Please run Settings → Diagnostics → Test Gemini so we can see why.")

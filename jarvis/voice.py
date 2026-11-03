@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import re
+import time
 import wave
 
 from google.genai import types
@@ -111,15 +112,31 @@ async def synthesize(text: str) -> tuple[bytes, str] | None:
     if not text:
         return None
     engine = s.get("voice_engine", "gemini")
+    edge_voice = s.get("edge_voice") or "en-GB-RyanNeural"
+    if engine == "gemini" and time.time() < _gemini_tts_paused_until:
+        engine = "edge"  # Gemini voice quota recently ran out: use the free British neural voice meanwhile
+    if engine == "gemini":
+        try:
+            return await anyio.to_thread.run_sync(_gemini_tts, text, s.get("gemini_voice") or "Charon")
+        except Exception as e:  # noqa: BLE001
+            _pause_gemini_tts(e)
+            engine = "edge"
     if engine == "edge":
         try:
-            return await _edge_tts(text, s.get("edge_voice") or "en-GB-RyanNeural")
+            return await _edge_tts(text, edge_voice)
         except Exception as e:  # noqa: BLE001
-            print("[voice] edge-tts failed, falling back to Gemini:", e)
-            engine = "gemini"
-    if engine == "gemini":
-        return await anyio.to_thread.run_sync(_gemini_tts, text, s.get("gemini_voice") or "Charon")
+            print("[voice] edge-tts failed, the device voice will be used:", e)
     return None
+
+
+_gemini_tts_paused_until = 0.0
+
+
+def _pause_gemini_tts(e: Exception) -> None:
+    global _gemini_tts_paused_until
+    quota = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+    _gemini_tts_paused_until = time.time() + (3600 if quota else 120)
+    print(f"[voice] Gemini TTS failed ({str(e)[:120]}); using the Microsoft British voice for now")
 
 
 def transcribe(audio: bytes, mime: str) -> str:
