@@ -470,6 +470,8 @@ def models():
 
     unavailable = {m: jarvis._why.get(m, "") for m, until in jarvis._cooldown.items() if until > _t.time()}
     return {"last_used": jarvis.last_model, "order": order, "available": avail, "unavailable": unavailable,
+            "live_models": __import__("jarvis.live", fromlist=["live_models"]).live_models(),
+            "live_setting": db.get_setting("live_model") or "auto",
             "setting": db.get_setting("model") or "auto", "strict": db.get_setting("model_strict") == "true"}
 
 

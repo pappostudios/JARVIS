@@ -68,6 +68,7 @@ DEFAULT_SETTINGS = {
     "wake_word": "false",         # listen on this PC for "Hey JARVIS" and open a Live call
     "wake_sensitivity": "normal", # low | normal | high
     "pc_control": "true",         # let JARVIS open apps/files and control media on this computer
+    "live_model": "auto",         # model for Live calls ("auto" = newest Live model the key offers)
     "model": "auto",
     "model_strict": "false",      # true = never fall back from the chosen model              # "auto" or a specific Gemini model id
     "daily_request_limit": "0",   # max Gemini requests per day (0 = no limit); Live calls not counted

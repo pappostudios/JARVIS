@@ -1012,7 +1012,7 @@ function checkReminders() {
 setInterval(checkReminders, 30000);
 
 /* ───────────────────────── settings ───────────────────────── */
-const SETTING_FIELDS = ["end_phrases", "wake_word", "wake_sensitivity", "pc_control", "model_strict", "daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
+const SETTING_FIELDS = ["live_model", "end_phrases", "wake_word", "wake_sensitivity", "pc_control", "model_strict", "daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
 
 async function openSettings() {
   $("#settings").classList.remove("hidden");
@@ -1027,6 +1027,9 @@ async function openSettings() {
   $("#modelInfo").textContent = "Checking which Gemini models your key can use…";
   fetch("/api/health").then((r) => r.json()).then((h) => { $("#versionInfo").textContent = `JARVIS version: ${h.version}`; }).catch(() => {});
   getJSON("/api/models").then((m) => {
+    const ls = $("#s_live_model");
+    ls.innerHTML = `<option value="auto">Automatic — newest Live model</option>` + (m.live_models || []).map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    ls.value = m.live_setting || "auto";
     const sel = $("#s_model");
     sel.innerHTML = `<option value="auto">Automatic — fastest reliable model (recommended)</option>` +
       m.available.map((n) => `<option value="${esc(n)}">${esc(n)}${n in (m.unavailable || {}) ? ` — unavailable: ${esc(m.unavailable[n] || "failed recently")}` : ""}</option>`).join("");

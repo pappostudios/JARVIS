@@ -184,6 +184,9 @@
             <select id="s_model"><option value="auto">Automatic — fastest reliable model (recommended)</option></select>
           </label>
           <label class="switch"><input type="checkbox" id="s_model_strict"><span>Only use this model (no automatic backups — if it fails, JARVIS tells you instead)</span></label>
+          <label>Live call model (real-time voice — text models like 2.5 Flash-Lite can't do calls)
+            <select id="s_live_model"><option value="auto">Automatic — newest Live model</option></select>
+          </label>
           <label>Response speed
             <select id="s_thinking">
               <option value="fast">Fast — quick answers (recommended)</option>
@@ -293,6 +296,6 @@
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>

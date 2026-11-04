@@ -243,6 +243,9 @@ async def _handle(ws: WebSocket) -> None:
         return
 
     models = await anyio.to_thread.run_sync(live_models)
+    chosen = (db.get_setting("live_model") or "auto").strip()
+    if chosen != "auto":  # the user's pick first; the others stay as backups if it can't connect
+        models = [chosen] + [m for m in models if m != chosen]
     client = agent.jarvis._ensure_client()
     idx, minimal, reconnects, last_err = 0, False, 0, ""
     connected_at: float | None = None
