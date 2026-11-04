@@ -390,7 +390,7 @@ async function startListening(auto = false) {
       const { text } = await (await api("/api/transcribe", { method: "POST", body: fd })).json();
       if (!text) { core.set("idle", "Didn't catch that"); setTimeout(() => state.coreMode === "idle" && core.set("idle"), 1800); return; }
       state.lastInputWasVoice = true;
-      if (isEndPhrase(text)) { stopSpeaking(); state.lastInputWasVoice = false; core.set("idle"); return; }
+      if (isEndPhrase(text)) { stopSpeaking(); endChime(); state.lastInputWasVoice = false; core.set("idle"); return; }
       send(text);
     } catch (e) { core.set("idle"); toast("Transcription failed: " + e.message, "bad"); }
   };
@@ -579,7 +579,11 @@ async function startLive() {
   };
 }
 
+/* descending two-tone "hang-up" sound — the wake chime in reverse */
+function endChime() { chime([990, 520]); }
+
 function stopLive(remote = false) {
+  if (live.active) setTimeout(endChime, 60);
   const ws = live.ws; live.ws = null;
   if (ws && ws.readyState <= 1) { try { ws.send(JSON.stringify({ type: "hangup" })); } catch {} ws.close(); }
   live.active = false;
@@ -682,7 +686,7 @@ const input = $("#input");
 el$("#composer").addEventListener("submit", (e) => {
   e.preventDefault(); state.lastInputWasVoice = false; const t = input.value.trim(); input.value = ""; autoGrow();
   if (!t) return;
-  if (isEndPhrase(t)) { stopSpeaking(); if (live.active) stopLive(); toast("Very good."); return; }
+  if (isEndPhrase(t)) { stopSpeaking(); if (live.active) stopLive(); else endChime(); toast("Very good."); return; }
   if (live.active && live.ws?.readyState === 1) { liveBubble("user", t); live.ws.send(JSON.stringify({ type: "text", text: t })); return; }
   send(t);
 });
@@ -1274,10 +1278,10 @@ setTab("assistant");
    The PC listens for "Hey JARVIS" (jarvis/wakeword.py) and pushes a "wake" event; the JARVIS window on that PC
    answers by opening a Live call. Phones/other devices ignore it. */
 let serverEvents = null;
-function chime() {
+function chime(notes = [660, 990]) {
   try {
     const ctx = ensureAudio(), t = ctx.currentTime;
-    [660, 990].forEach((f, i) => {
+    notes.forEach((f, i) => {
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.frequency.value = f; o.type = "sine";
       g.gain.setValueAtTime(0, t + i * 0.12); g.gain.linearRampToValueAtTime(0.18, t + i * 0.12 + 0.02);
