@@ -1317,18 +1317,44 @@ async function loadRoutines() {
   const { routines, help } = await getJSON("/api/routines");
   $("#rHelp").textContent = "Step forms: " + help.join(" · ");
   list.innerHTML = routines.map((r) => `<li data-name="${esc(r.name)}"><div class="r-top"><span class="r-name">${esc(r.name)}</span>
-      <span class="row" style="gap:6px"><button class="mini" data-r-run>Run</button><button class="mini" data-r-del>Delete</button></span></div>
+      <span class="row" style="gap:6px"><button class="mini" data-r-run>Run</button><button class="mini" data-r-edit>Edit</button><button class="mini" data-r-del>Delete</button></span></div>
       <div class="r-trig">${r.triggers.map((t) => "“" + esc(t) + "”").join("  ")}</div>
       <ol>${r.actions.map((a) => `<li>${esc(a)}</li>`).join("")}</ol></li>`).join("") || '<li class="muted">No routines yet.</li>';
+  state.routines = routines;
   $$("#routineList li[data-name]").forEach((li) => {
+    $("[data-r-edit]", li).onclick = () => editRoutine(routines.find((r) => r.name === li.dataset.name));
     $("[data-r-run]", li).onclick = guard(async () => { const r = await postJSON(`/api/routines/${encodeURIComponent(li.dataset.name)}/run`); toast(r.problems?.length ? "Problems: " + r.problems.join("; ") : `${li.dataset.name} done.`, r.problems?.length ? "warn" : ""); });
     $("[data-r-del]", li).onclick = guard(async () => { if (!confirm(`Delete routine “${li.dataset.name}”?`)) return; await api(`/api/routines/${encodeURIComponent(li.dataset.name)}`, { method: "DELETE" }); loadRoutines(); });
   });
 }
+function editRoutine(r) {
+  if (!r) return;
+  state.editingRoutine = r.name;
+  $("#rName").value = r.name;
+  $("#rTriggers").value = r.triggers.join(", ");
+  $("#rActions").value = r.actions.join("\n");
+  $("#rFormTitle").textContent = `Editing “${r.name}”`;
+  $("#rSave").textContent = "Save changes";
+  $("#rCancel").classList.remove("hidden");
+  $("#routineForm").open = true;
+  $("#routineForm").scrollIntoView({ behavior: "smooth", block: "center" });
+  $("#rActions").focus();
+}
+function resetRoutineForm() {
+  state.editingRoutine = null;
+  $("#rName").value = $("#rTriggers").value = $("#rActions").value = "";
+  $("#rFormTitle").textContent = "+ New routine";
+  $("#rSave").textContent = "Save routine";
+  $("#rCancel").classList.add("hidden");
+  $("#routineForm").open = false;
+}
+el$("#rCancel").addEventListener("click", resetRoutineForm);
 el$("#rSave").addEventListener("click", guard(async () => {
-  await postJSON("/api/routines", { name: $("#rName").value.trim(), triggers: $("#rTriggers").value.split(",").map((t) => t.trim()).filter(Boolean),
+  const r = await postJSON("/api/routines", { name: $("#rName").value.trim(), old_name: state.editingRoutine || "",
+    triggers: $("#rTriggers").value.split(",").map((t) => t.trim()).filter(Boolean),
     actions: $("#rActions").value.split("\n").map((a) => a.trim()).filter(Boolean) });
-  toast("Routine saved."); $("#rName").value = $("#rTriggers").value = $("#rActions").value = ""; loadRoutines();
+  toast(r.updated ? `“${r.updated}” updated.` : "Routine saved.");
+  resetRoutineForm(); loadRoutines();
 }));
 
 /* "shut up" & co: stop talking / hang up immediately, without asking Gemini */

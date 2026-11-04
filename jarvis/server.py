@@ -402,6 +402,7 @@ class RoutineBody(BaseModel):
     name: str
     triggers: list[str]
     actions: list[str]
+    old_name: str = ""
 
 
 @app.get("/api/routines")
@@ -416,7 +417,7 @@ def save_routine(body: RoutineBody):
     from . import routines
 
     try:
-        return routines.create_routine(body.name, body.triggers, body.actions)
+        return routines.create_routine(body.name, body.triggers, body.actions, body.old_name)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 

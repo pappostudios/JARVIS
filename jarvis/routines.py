@@ -95,8 +95,10 @@ def all_routines() -> list[dict]:
     return [_row(r) for r in db.query("SELECT * FROM routines ORDER BY name")]
 
 
-def create_routine(name: str, triggers: list[str], actions: list[str]) -> dict:
-    """Create (or replace) a routine: trigger phrases the user will say, and the steps to run on the PC instantly.
+def create_routine(name: str, triggers: list[str], actions: list[str], old_name: str = "") -> dict:
+    """Create a routine, or EDIT one: to edit, call list_routines first, then call this with the same name and the
+    complete new trigger and step lists (to rename, pass the current name as old_name and the new one as name).
+    A routine is trigger phrases the user will say, and steps to run on the PC instantly.
     Write each step in this simple form (one per item): "minimize all", "minimize <app>", "close <app>",
     "maximize <app>", "switch to <app>", "open app <name>", "open website <address>", "open folder <name>",
     "open file <name>", "play/pause music", "next track", "volume <0-100>", "mute", "say <text>", "wait <seconds>".
@@ -106,7 +108,10 @@ def create_routine(name: str, triggers: list[str], actions: list[str]) -> dict:
         name: Short name of the routine.
         triggers: Phrases that start it (short; the whole message must be the phrase).
         actions: Steps in the form above, in order.
+        old_name: When renaming an existing routine: its current name.
     """
+    if not name.strip():
+        raise ValueError("A routine needs a name.")
     trig = [t.strip() for t in triggers if t and t.strip()]
     if not trig:
         raise ValueError("A routine needs at least one trigger phrase.")
@@ -115,15 +120,21 @@ def create_routine(name: str, triggers: list[str], actions: list[str]) -> dict:
         raise ValueError("A routine needs at least one step.")
     for s in steps:
         parse_action(s)   # validate now, so mistakes surface while the user is still talking about it
-    taken = {t: r["name"] for r in all_routines() if r["name"].lower() != name.strip().lower()
+    replacing = {name.strip().lower(), old_name.strip().lower()} - {""}
+    if old_name.strip() and old_name.strip().lower() != name.strip().lower() and \
+            any(r["name"].lower() == name.strip().lower() for r in all_routines()):
+        raise ValueError(f"There's already a routine called '{name.strip()}'.")
+    taken = {t: r["name"] for r in all_routines() if r["name"].lower() not in replacing
              for t in map(_norm, r["triggers"])}
     clash = [t for t in trig if _norm(t) in taken]
     if clash:
         raise ValueError(f"'{clash[0]}' already starts the routine '{taken[_norm(clash[0])]}'.")
-    db.execute("DELETE FROM routines WHERE name = ?", (name.strip(),))
+    edited = any(r["name"].lower() in replacing for r in all_routines())
+    for n in replacing:
+        db.execute("DELETE FROM routines WHERE name = ? COLLATE NOCASE", (n,))
     db.execute("INSERT INTO routines(name, triggers, actions, created_at) VALUES(?,?,?,?)",
                (name.strip(), json.dumps(trig), json.dumps(steps), db.now_iso()))
-    return {"created": name.strip(), "triggers": trig, "actions": steps}
+    return {"updated" if edited else "created": name.strip(), "triggers": trig, "actions": steps}
 
 
 def list_routines() -> list[dict]:
