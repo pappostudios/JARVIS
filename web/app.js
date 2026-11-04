@@ -727,7 +727,7 @@ function renderNextUp(events) {
 }
 
 function googleMissing(el, msg) {
-  el.innerHTML = `<li class="empty">${esc(msg || "Google not connected.")}<br><button class="mini" style="margin-top:8px" onclick="openSettings()">Connect Google</button></li>`;
+  el.innerHTML = `<li class="empty">${esc(msg || "Google not connected.")}<br><button class="mini" style="margin-top:8px" onclick="openSettings('accounts')">Connect Google</button></li>`;
 }
 
 /* Inbox switch: All / each connected account (only shown with 2+ accounts). Uses Gmail only — no Gemini. */
@@ -1014,8 +1014,43 @@ setInterval(checkReminders, 30000);
 /* ───────────────────────── settings ───────────────────────── */
 const SETTING_FIELDS = ["live_model", "end_phrases", "wake_word", "wake_sensitivity", "pc_control", "model_strict", "daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
 
-async function openSettings() {
+/* ───────────────────────── settings tabs & search ───────────────────────── */
+const SET_TABS = [["accounts", "Accounts"], ["you", "You"], ["ai", "AI"], ["voice", "Voice"], ["auto", "Automation"], ["system", "System"]];
+function showSettingsTab(tab) {
+  if (!SET_TABS.some(([k]) => k === tab)) tab = "accounts";
+  state.settingsTab = tab;
+  try { localStorage.setItem("jarvis.settingsTab", tab); } catch {}
+  const q = ($("#setSearch").value || "").trim().toLowerCase();
+  let shown = 0;
+  $$("#settings section[data-tab]").forEach((sec) => {
+    const hay = (sec.textContent + " " + (sec.dataset.keywords || "") + " " + sec.dataset.tabname).toLowerCase();
+    const match = q ? q.split(/\s+/).every((w) => hay.includes(w)) : sec.dataset.tab === tab;
+    sec.classList.toggle("hidden", !match);
+    if (match) shown++;
+  });
+  $("#settings .drawer").classList.toggle("searching", !!q);
+  $("#setTabs").classList.toggle("hidden", !!q);
+  $("#setNone").classList.toggle("hidden", shown > 0);
+  $$("#setTabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  $("#settings .drawer-body").scrollTop = 0;
+}
+(function initSettingsTabs() {
+  const tabs = $("#setTabs"); if (!tabs) return;
+  tabs.innerHTML = SET_TABS.map(([k, label]) => `<button type="button" role="tab" data-tab="${k}">${label}</button>`).join("");
+  $$("#setTabs button").forEach((b) => (b.onclick = () => { $("#setSearch").value = ""; showSettingsTab(b.dataset.tab); }));
+  const names = Object.fromEntries(SET_TABS);
+  $$("#settings section[data-tab]").forEach((sec) => {
+    sec.dataset.tabname = names[sec.dataset.tab];
+    const h = $("h3", sec); if (h) h.dataset.tabname = " · " + names[sec.dataset.tab];
+  });
+  $("#setSearch").addEventListener("input", () => showSettingsTab(state.settingsTab));
+  try { state.settingsTab = localStorage.getItem("jarvis.settingsTab") || "accounts"; } catch { state.settingsTab = "accounts"; }
+})();
+
+async function openSettings(tab) {
   $("#settings").classList.remove("hidden");
+  $("#setSearch").value = "";
+  showSettingsTab(typeof tab === "string" ? tab : state.settingsTab);
   const data = await getJSON("/api/settings");
   $("#s_gemini_voice").innerHTML = data.gemini_voices.map((v) => `<option>${v}</option>`).join("");
   $("#s_edge_voice").innerHTML = data.edge_voices.map((v) => `<option>${v}</option>`).join("");

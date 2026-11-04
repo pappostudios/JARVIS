@@ -100,7 +100,7 @@ def check_limit() -> None:
     if limit and requests_today() >= limit:
         raise DailyLimitReached(
             f"I've reached today's limit of {limit} Gemini requests that you set, so I've paused to keep you within "
-            "budget. You can raise or remove the limit in Settings → Usage limit; it resets at midnight. "
+            "budget. You can raise or remove the limit in Settings → AI → Usage limit; it resets at midnight. "
             "(Live calls still work.)")
 
 

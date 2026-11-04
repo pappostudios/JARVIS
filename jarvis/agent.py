@@ -365,7 +365,7 @@ class Jarvis:
                     raise RuntimeError(f"Couldn't reach Gemini: {e}") from e
         if strict:
             raise RuntimeError(f"Your chosen model {chosen} didn't answer ({self._why.get(chosen, 'error')}). "
-                               "Pick another model in Settings → Brain, or turn off 'Only use this model'.")
+                               "Pick another model in Settings → AI, or turn off 'Only use this model'.")
         if quota and not overloaded:
             raise RuntimeError(
                 "Your Gemini free-tier quota is used up for every model I can use (" + ", ".join(quota) + "). "

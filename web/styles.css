@@ -327,6 +327,20 @@ body.live-on .chips, body.live-on #micBtn, body.live-on #convBtn { display: none
 .routine-new summary { cursor: pointer; color: var(--cyan); font-size: 13px; }
 .routine-new[open] { display: flex; flex-direction: column; gap: 8px; }
 
+/* settings: tabs, search, sticky save */
+.settings-drawer { width: min(560px, 100%); }
+.set-search { width: 100%; margin: 2px 0 10px; }
+.set-tabs { display: flex; gap: 4px; overflow-x: auto; margin-bottom: 14px; padding-bottom: 2px; scrollbar-width: none; flex: 0 0 auto; }
+.set-tabs::-webkit-scrollbar { display: none; }
+.set-tabs button { flex: 0 0 auto; background: none; border: 1px solid transparent; border-radius: 9px; padding: 7px 13px; cursor: pointer; color: var(--muted);
+  font: 600 12px var(--display); letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; }
+.set-tabs button:hover { color: var(--text); }
+.set-tabs button.on { color: var(--cyan); border-color: var(--line-2); background: rgba(70, 217, 255, .1); }
+.drawer-foot { flex: 0 0 auto; padding-top: 12px; margin-top: 10px; border-top: 1px solid var(--line); }
+.settings-drawer .drawer-body { flex: 1 1 auto; min-height: 0; }
+.settings-drawer section + section { padding-top: 16px; border-top: 1px solid var(--line); }
+.settings-drawer.searching h3::after { content: attr(data-tabname); color: var(--cyan); opacity: .7; letter-spacing: .1em; }
+
 /* toasts */
 .toasts { position: fixed; z-index: 60; top: 76px; right: 20px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
 .toast { pointer-events: auto; background: var(--panel-solid); border: 1px solid var(--line-2); border-left: 3px solid var(--cyan); padding: 10px 14px; border-radius: 10px; max-width: 340px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); animation: rise .25s; font-size: 13px; }

@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
@@ -144,10 +144,12 @@
 
   <!-- ── Settings drawer ─────────────────── -->
   <div id="settings" class="overlay hidden">
-    <div class="drawer">
+    <div class="drawer settings-drawer">
       <header class="panel-h"><h2>Settings</h2><button class="icon-btn" id="closeSettings" aria-label="Close">✕</button></header>
+      <input id="setSearch" class="set-search" type="search" placeholder="Search settings… (e.g. voice, model, work email)" autocomplete="off" aria-label="Search settings">
+      <nav id="setTabs" class="set-tabs" role="tablist" aria-label="Settings sections"></nav>
       <div class="drawer-body">
-        <section>
+        <section data-tab="accounts" data-keywords="gmail calendar email google sign in login work personal credentials connect disconnect">
           <h3>Google accounts</h3>
           <p id="googleStatus" class="muted">Checking…</p>
           <ul id="googleAccounts" class="accounts"></ul>
@@ -175,12 +177,22 @@
             <label class="btn file-btn hidden" id="googleReupload">Replace credentials file<input type="file" id="credFile2" accept=".json,application/json" hidden></label>
           </div>
         </section>
-        <section>
+        <section data-tab="you" data-keywords="name address sir ma'am background context work hours working time">
           <h3>About you</h3>
           <label>Your name<input id="s_user_name" placeholder="e.g. Tony"></label>
           <label>JARVIS calls you<input id="s_address_as" placeholder="sir"></label>
           <label>Context JARVIS should know<textarea id="s_about_me" rows="3" placeholder="Role, company, how you like emails written, people who matter…"></textarea></label>
-          <label>Brain (Gemini model)
+          <div class="row">
+            <label>Work starts<input id="s_work_start" type="time"></label>
+            <label>Work ends<input id="s_work_end" type="time"></label>
+          </div>
+        </section>
+        <section data-tab="you" data-keywords="remember facts forget memories">
+          <h3>Memory</h3>
+          <ul id="memories" class="memories"></ul>
+        </section>
+        <section data-tab="ai" data-keywords="model brain gemini flash lite pro live call thinking speed fast deep backup fallback 2.5 3.5">
+          <h3>Models &amp; speed</h3><label>Brain (Gemini model)
             <select id="s_model"><option value="auto">Automatic — fastest reliable model (recommended)</option></select>
           </label>
           <label class="switch"><input type="checkbox" id="s_model_strict"><span>Only use this model (no automatic backups — if it fails, JARVIS tells you instead)</span></label>
@@ -194,12 +206,15 @@
               <option value="deep">Deep — slowest, most thorough</option>
             </select>
           </label>
-          <div class="row">
-            <label>Work starts<input id="s_work_start" type="time"></label>
-            <label>Work ends<input id="s_work_end" type="time"></label>
-          </div>
+          </section>
+        <section data-tab="ai" data-keywords="limit daily requests quota budget cost tokens free paid">
+          <h3>Usage limit</h3>
+          <label>Daily Gemini request limit (0 = no limit)
+            <input id="s_daily_request_limit" type="number" min="0" step="10" inputmode="numeric" placeholder="0">
+          </label>
+          <p class="muted" style="margin:0;font-size:12px">When reached, JARVIS pauses text &amp; voice messages until midnight and speaks with the free Microsoft voice. Live calls aren't counted. See today's count under System → Usage &amp; free tier.</p>
         </section>
-        <section>
+        <section data-tab="voice" data-keywords="voice accent british speak speech engine microsoft gemini tts interrupt headphones">
           <h3>Voice</h3>
           <label>Engine
             <select id="s_voice_engine">
@@ -214,14 +229,7 @@
           <label class="switch"><input type="checkbox" id="s_live_interrupt"><span>Live calls: interrupt JARVIS by speaking (use headphones — with speakers he may hear himself)</span></label>
           <button class="btn" id="testVoice">Test voice</button>
         </section>
-        <section>
-          <h3>Usage limit</h3>
-          <label>Daily Gemini request limit (0 = no limit)
-            <input id="s_daily_request_limit" type="number" min="0" step="10" inputmode="numeric" placeholder="0">
-          </label>
-          <p class="muted" style="margin:0;font-size:12px">When reached, JARVIS pauses text &amp; voice messages until midnight and speaks with the free Microsoft voice. Live calls aren't counted. See today's count under System → Usage &amp; free tier.</p>
-        </section>
-        <section>
+        <section data-tab="voice" data-keywords="wake hey jarvis hi jarvis listen microphone sensitivity">
           <h3>Wake word</h3>
           <label class="switch"><input type="checkbox" id="s_wake_word"><span>Listen on this PC for “Hey JARVIS” and open a call (runs offline on your computer)</span></label>
           <label>Sensitivity
@@ -233,7 +241,11 @@
           </label>
           <p class="muted" id="wakeStatus" style="margin:0;font-size:12.5px"></p>
         </section>
-        <section>
+        <section data-tab="voice" data-keywords="shut up goodbye hang up end call phrases">
+          <h3>Ending a call by voice</h3>
+          <label>Phrases that hang up (comma-separated)<input id="s_end_phrases" placeholder="shut up, goodbye jarvis"></label>
+        </section>
+        <section data-tab="auto" data-keywords="routine trigger home steps macro automation edit">
           <h3>Routines</h3>
           <p class="muted" style="margin:0;font-size:12.5px">Say a trigger word (e.g. “home”) and JARVIS runs the steps instantly — no Gemini request. You can also just tell him: “create a routine: when I say home, minimise everything and open Spotify”.</p>
           <ul id="routineList" class="routines"></ul>
@@ -246,23 +258,15 @@
               <button type="button" class="btn hidden" id="rCancel">Cancel</button></div>
           </details>
         </section>
-        <section>
-          <h3>Ending a call by voice</h3>
-          <label>Phrases that hang up (comma-separated)<input id="s_end_phrases" placeholder="shut up, goodbye jarvis"></label>
-        </section>
-        <section>
+        <section data-tab="auto" data-keywords="pc computer apps files folders media volume windows open close minimise">
           <h3>PC control</h3>
           <label class="switch"><input type="checkbox" id="s_pc_control"><span>Let JARVIS open apps, websites, files and folders, and control media &amp; volume on this computer</span></label>
         </section>
-        <section>
+        <section data-tab="auto" data-keywords="confirm approval ask before send email invite delete">
           <h3>Safety</h3>
           <label class="switch"><input type="checkbox" id="s_require_confirmation"><span>Ask before sending emails, inviting people or deleting events</span></label>
         </section>
-        <section>
-          <h3>Memory</h3>
-          <ul id="memories" class="memories"></ul>
-        </section>
-        <section>
+        <section data-tab="system" data-keywords="update version restart shut down usage free tier tokens diagnostics log notifications clear conversation">
           <h3>System</h3>
           <p class="muted" id="versionInfo"></p>
           <p class="muted" id="modelInfo"></p>
@@ -281,8 +285,9 @@
             <button class="btn danger" id="shutdownBtn">Shut down JARVIS</button>
           </div>
         </section>
-        <button class="btn primary wide" id="saveSettings">Save settings</button>
+        <p id="setNone" class="muted hidden" style="text-align:center">No settings match.</p>
       </div>
+      <div class="drawer-foot"><button class="btn primary wide" id="saveSettings">Save settings</button></div>
     </div>
   </div>
 
@@ -296,6 +301,6 @@
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
-  <script src="app.js?v=18"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>

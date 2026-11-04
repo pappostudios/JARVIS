@@ -80,7 +80,7 @@ Google requires you to create that key yourself — JARVIS walks you through it:
 JARVIS can manage several Google accounts at once — e.g. your personal Gmail and your work email.
 
 1. In Google Cloud → **Google Auth Platform → Audience → Test users**, add the second address too.
-2. In JARVIS: **Settings → Google accounts → Add another Google account**, and pick the other account on Google's
+2. In JARVIS: **Settings → Accounts → Add another Google account**, and pick the other account on Google's
    page ("Use another account" if needed).
 3. Give each account a label (**personal**, **work**) and choose which is the **default**.
 
@@ -103,20 +103,35 @@ dashboard opens in its own app window. Enter your access code once. Click the mi
 
 - Closing the dashboard window does **not** stop JARVIS, so your phone stays connected. Click the icon again to
   reopen the window.
-- To stop him: **Settings → Shut down JARVIS**.
+- To stop him: **Settings → System → Shut down JARVIS**.
 - To start JARVIS with Windows: press `Win+R`, type `shell:startup`, and copy the desktop shortcut there.
-- If anything misbehaves: **Settings → Diagnostics** shows the log (also saved in `data\jarvis.log`), or run
+- If anything misbehaves: **Settings → System → Diagnostics** shows the log (also saved in `data\jarvis.log`), or run
   **`JARVIS-debug.bat`** to start him with a visible console.
 
 ### Updating to a new version
 No reinstalling. JARVIS updates himself and keeps your `.env`, projects, memory and Google sign-in:
 
-- **In the app:** Settings → **Check for updates** → **Update & restart**. JARVIS also tells you when an update is
+- **In the app:** Settings → System → **Check for updates** → **Update & restart**. JARVIS also tells you when an update is
   available.
 - **Or** double-click **`update.bat`** in the JARVIS folder.
 
 The very first time, `update.bat` installs **Git** (a free tool JARVIS uses to download only what changed) if you
 don't have it, then links your folder to GitHub. After that, updates take a few seconds.
+
+### Where things are in Settings
+
+The ⚙ Settings window has a **search box** (type e.g. *voice*, *model*, *work email*) and six tabs:
+
+| Tab | What's in it |
+|---|---|
+| **Accounts** | Google accounts (personal / work), credentials |
+| **You** | Your name, how he addresses you, background, working hours, Memory |
+| **AI** | Brain and Live-call models, response speed, daily request limit |
+| **Voice** | Voice engine and accent, interrupting, "Hey JARVIS" wake word, hang-up phrases |
+| **Automation** | Routines, PC control, approval before sending emails |
+| **System** | Updates, Usage & free tier, Diagnostics, notifications, clear conversation, shut down |
+
+**Save settings** stays at the bottom whichever tab you're on.
 
 ## 5. Connect your Android phone
 
@@ -169,7 +184,7 @@ hands-free back-and-forth.
 
 ## "Hey JARVIS" wake word
 
-**Settings → Wake word → Listen on this PC for "Hey JARVIS"**. Say **"Hey JARVIS"** (or "Hi JARVIS") and he chimes and
+**Settings → Voice → Wake word → Listen on this PC for "Hey JARVIS"**. Say **"Hey JARVIS"** (or "Hi JARVIS") and he chimes and
 opens a Live call in the JARVIS window. The first time you switch it on, JARVIS installs the wake-word engine
 (openWakeWord, ~100 MB, a few minutes) — the setting shows its progress.
 
@@ -183,7 +198,7 @@ opens a Live call in the JARVIS window. The first time you switch it on, JARVIS 
 
 Say **"shut up"**, **"goodbye JARVIS"**, **"that's all JARVIS"** or **"thank you JARVIS"** and the Live call ends
 immediately. Outside a call, saying or typing it just stops him talking. Edit the phrases in
-**Settings → Ending a call by voice**. (A phrase only counts at the start or end of what you say, so
+**Settings → Voice → Ending a call by voice**. (A phrase only counts at the start or end of what you say, so
 "book a hang-up meeting" won't end the call.)
 
 ## Routines
@@ -191,7 +206,7 @@ immediately. Outside a call, saying or typing it just stops him talking. Edit th
 Your own trigger words that run steps on the PC **instantly, without using a Gemini request**:
 
 - Just tell him: *"Create a routine: when I say **home**, minimise everything, open Spotify and say welcome home."*
-- Or **Settings → Routines → + New routine**: a name, trigger phrases, and one step per line.
+- Or **Settings → Automation → Routines → + New routine**: a name, trigger phrases, and one step per line.
 - Then say or type **"home"** (also "Jarvis, home" / "home please"). In Live calls he runs it when you say it.
 
 Step forms: `minimize all` · `minimize <app>` · `close <app>` · `close all` · `maximize <app>` ·
@@ -221,7 +236,7 @@ JARVIS can act on the computer he runs on — also when you ask from your phone:
 | "Minimise everything", "minimise Chrome", "close Spotify", "switch to Word", "maximise the invoice" | Window control — JARVIS's own window is never touched; "close all" asks first |
 
 Safety: the file finder never runs programs or scripts (.exe, .bat, .ps1…) — apps open only through "open app".
-Turn the whole feature off in **Settings → PC control**.
+Turn the whole feature off in **Settings → Automation → PC control**.
 
 ## Using less (tokens & requests)
 
@@ -233,11 +248,11 @@ your recent conversation (roughly 5,000–10,000 tokens). Lookups add a request 
 | **Use the dashboard for simple things** — tick off or add tasks, switch to-do views, read the calendar and inbox panels | No Gemini at all: the panels read Google directly |
 | **Settings → Voice → Engine: Microsoft neural en-GB** (or turn off *Speak replies aloud*) | Saves 1–2 Gemini requests on every spoken reply — and it's very British |
 | **Talk with Live calls** (green phone button) instead of the microphone button | One continuous call on Live's separate quota, no transcription or voice requests |
-| **Settings → Response speed: Fast** | Less "thinking" = fewer output tokens |
-| **Settings → Brain: a Flash-Lite model** for everyday use | Fastest and cheapest; keep the bigger model for heavy planning |
+| **Settings → AI → Response speed: Fast** | Less "thinking" = fewer output tokens |
+| **Settings → AI → Brain: a Flash-Lite model** for everyday use | Fastest and cheapest; keep the bigger model for heavy planning |
 | **Clear the conversation now and then** (Settings → System) | Recent history is re-sent with every request; a long chat makes every message heavier |
 | **Ask specific questions** — *"any emails from Dana today?"* rather than *"summarise my inbox"* | Fewer emails read = far fewer tokens |
-| **Set a daily limit** (Settings → Usage limit) | Hard stop so a busy day can't run away with your quota or bill |
+| **Set a daily limit** (Settings → AI → Usage limit) | Hard stop so a busy day can't run away with your quota or bill |
 
 What each action costs, roughly:
 
@@ -274,15 +289,15 @@ you, and voice live in the dashboard's **Settings** panel.
   your Google token is `data/token.json`. Both are git-ignored — never share the `data` folder or `.env`.
 - Text you send, and email/calendar content JARVIS reads to answer you, is sent to the Gemini API to process.
 - The dashboard requires the access code; brute-force attempts are rate-limited.
-- To revoke Google access at any time: Settings → Disconnect, and/or https://myaccount.google.com/permissions.
+- To revoke Google access at any time: Settings → Accounts → Disconnect, and/or https://myaccount.google.com/permissions.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
 | Red bar “JARVIS server is not running” | Start JARVIS from the desktop icon; the page reconnects by itself. If it keeps stopping, open `data\jarvis.log` (or run `JARVIS-debug.bat`) and look at the last lines. |
-| “GEMINI_API_KEY missing” | Put the key in `.env`, then Settings → Shut down JARVIS and start him again. |
-| “Google account is not connected” | Do step 3 (Settings → Google account). |
+| “GEMINI_API_KEY missing” | Put the key in `.env`, then Settings → System → Shut down JARVIS and start him again. |
+| “Google account is not connected” | Do step 3 (Settings → Accounts). |
 | Upload says “Web application client” | You created the wrong client type — create a new one of type **Desktop app**. |
 | `access_denied` / “app not verified” blocks sign-in | Add your Gmail as a **Test user** on the OAuth consent screen. |
 | Microphone button does nothing on the phone | You're on plain `http://` — use Tailscale's `https://` address. |
