@@ -7,7 +7,7 @@ import traceback
 from datetime import date, datetime
 from typing import Any, Callable, Optional
 
-from . import config, db, google_services as g, pc_control as pc, projects as p, web
+from . import config, db, google_services as g, pc_control as pc, projects as p, routines as rt, web
 
 
 # ── time tool ─────────────────────────────────────────────────
@@ -34,6 +34,8 @@ def _needs_confirmation(name: str, args: dict) -> bool:
         return True
     if name == "update_event" and (args.get("add_attendees") or args.get("remove_attendees")):
         return True
+    if name == "close_windows" and pc._norm(str(args.get("target", ""))) in pc.ALL_WORDS:
+        return True  # closing everything at once: ask first
     return False
 
 
@@ -59,6 +61,8 @@ def _describe(name: str, a: dict) -> str:
         return f"Delete calendar event {a.get('event_id')}"
     if name == "delete_project":
         return f"Delete project “{a.get('project')}”"
+    if name == "close_windows":
+        return "Close ALL open windows on your PC (apps will still ask about unsaved work)"
     return f"{name}({json.dumps(a)})"
 
 
@@ -133,6 +137,9 @@ TOOL_FUNCS: list[Callable[..., Any]] = [
     web.web_search, web.read_webpage,
     # this computer
     pc.open_app, pc.open_website, pc.find_files, pc.open_file, pc.open_folder, pc.media_control,
+    pc.list_windows, pc.minimize_windows, pc.close_windows, pc.maximize_window, pc.focus_window,
+    # routines
+    rt.create_routine, rt.list_routines, rt.delete_routine, rt.run_routine,
     # memory
     p.remember, p.list_memories, p.forget,
     # approvals
@@ -148,6 +155,9 @@ STATUS_LABELS = {
     "reply_to_email": "Composing reply", "create_draft": "Drafting email", "mark_emails_read": "Tidying inbox",
     "archive_emails": "Archiving", "remember": "Committing to memory",
     "web_search": "Searching the web", "read_webpage": "Reading web page",
+    "list_windows": "Checking windows", "minimize_windows": "Minimising", "close_windows": "Closing windows",
+    "maximize_window": "Maximising", "focus_window": "Switching window", "create_routine": "Saving routine",
+    "run_routine": "Running routine", "list_routines": "Checking routines", "delete_routine": "Deleting routine",
     "open_app": "Opening app", "open_website": "Opening website", "find_files": "Searching files",
     "open_file": "Opening file", "open_folder": "Opening folder", "media_control": "Adjusting media",
     "list_projects": "Reviewing projects", "get_project": "Reviewing project", "create_project": "Creating project",
@@ -167,14 +177,15 @@ def _jsonable(x: Any) -> Any:
     return x
 
 
-def call_tool(name: str, args: Optional[dict]) -> dict:
-    """Run a tool requested by the model and always return a JSON-able dict."""
+def call_tool(name: str, args: Optional[dict], approved: bool = False) -> dict:
+    """Run a tool requested by the model and always return a JSON-able dict.
+    approved=True skips the approval gate (used for the user's own routines)."""
     args = dict(args or {})
     fn = TOOLS.get(name)
     if fn is None:
         return {"error": f"Unknown tool {name}"}
     try:
-        if _needs_confirmation(name, args):
+        if not approved and _needs_confirmation(name, args):
             summary = _enrich_summary(name, args, _describe(name, args))
             aid = db.add_pending(name, args, summary, turns.value)
             return {

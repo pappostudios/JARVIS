@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=14">
+  <link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
@@ -231,6 +231,22 @@
           <p class="muted" id="wakeStatus" style="margin:0;font-size:12.5px"></p>
         </section>
         <section>
+          <h3>Routines</h3>
+          <p class="muted" style="margin:0;font-size:12.5px">Say a trigger word (e.g. “home”) and JARVIS runs the steps instantly — no Gemini request. You can also just tell him: “create a routine: when I say home, minimise everything and open Spotify”.</p>
+          <ul id="routineList" class="routines"></ul>
+          <details class="routine-new"><summary>+ New routine</summary>
+            <label>Name<input id="rName" placeholder="Home"></label>
+            <label>Trigger phrases (comma-separated)<input id="rTriggers" placeholder="home, I'm home"></label>
+            <label>Steps (one per line)<textarea id="rActions" rows="4" placeholder="minimize all&#10;open app Spotify&#10;say Welcome home, sir."></textarea></label>
+            <p class="muted" id="rHelp" style="margin:0;font-size:11.5px"></p>
+            <button type="button" class="btn primary" id="rSave">Save routine</button>
+          </details>
+        </section>
+        <section>
+          <h3>Ending a call by voice</h3>
+          <label>Phrases that hang up (comma-separated)<input id="s_end_phrases" placeholder="shut up, goodbye jarvis"></label>
+        </section>
+        <section>
           <h3>PC control</h3>
           <label class="switch"><input type="checkbox" id="s_pc_control"><span>Let JARVIS open apps, websites, files and folders, and control media &amp; volume on this computer</span></label>
         </section>
@@ -276,6 +292,6 @@
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

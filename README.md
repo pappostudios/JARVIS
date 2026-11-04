@@ -179,6 +179,26 @@ opens a Live call in the JARVIS window. The first time you switch it on, JARVIS 
 - **The JARVIS window must be open** (it can be in the background); the PC needs a microphone.
 - **Phones:** Android doesn't let a web page listen in the background — on the phone, tap the green call button.
 
+## Ending a call by voice
+
+Say **"shut up"**, **"goodbye JARVIS"**, **"that's all JARVIS"** or **"thank you JARVIS"** and the Live call ends
+immediately. Outside a call, saying or typing it just stops him talking. Edit the phrases in
+**Settings → Ending a call by voice**. (A phrase only counts at the start or end of what you say, so
+"book a hang-up meeting" won't end the call.)
+
+## Routines
+
+Your own trigger words that run steps on the PC **instantly, without using a Gemini request**:
+
+- Just tell him: *"Create a routine: when I say **home**, minimise everything, open Spotify and say welcome home."*
+- Or **Settings → Routines → + New routine**: a name, trigger phrases, and one step per line.
+- Then say or type **"home"** (also "Jarvis, home" / "home please"). In Live calls he runs it when you say it.
+
+Step forms: `minimize all` · `minimize <app>` · `close <app>` · `close all` · `maximize <app>` ·
+`switch to <app>` · `open app <name>` · `open website <address>` · `open folder <name>` · `open file <name>` ·
+`play/pause music` · `next track` · `previous track` · `volume up` · `volume down` · `mute` · `volume <0-100>` ·
+`say <text>` · `wait <seconds>`
+
 ## Web search
 
 Ask anything current — *"what's the weather in Tel Aviv tomorrow?"*, *"latest news about OpenAI"*, *"when does
@@ -198,6 +218,7 @@ JARVIS can act on the computer he runs on — also when you ask from your phone:
 | "Find my invoice from October" | Searches Desktop, Documents, Downloads, Pictures, Music, Videos and OneDrive |
 | "Open Dana's client plan" / "open my KJ Fitness folder" | Opens the best-matching file or folder |
 | "Pause the music", "next song", "volume up", "set the volume to 30%" | Media keys and volume (Spotify, YouTube, etc.) |
+| "Minimise everything", "minimise Chrome", "close Spotify", "switch to Word", "maximise the invoice" | Window control — JARVIS's own window is never touched; "close all" asks first |
 
 Safety: the file finder never runs programs or scripts (.exe, .bat, .ps1…) — apps open only through "open app".
 Turn the whole feature off in **Settings → PC control**.

@@ -177,6 +177,13 @@ class _Call:
                     await self._begin_turn()
                     self.user_buf += sc.input_transcription.text
                     await self.send(type="user_text", text=sc.input_transcription.text)
+                    from . import routines
+
+                    if routines.is_end_phrase(self.user_buf):   # "shut up" / "goodbye Jarvis": hang up now
+                        self._save_turn()
+                        await self.send(type="end_call")
+                        self.hung_up = True
+                        return "hangup"
                 if sc.model_turn:
                     for part in sc.model_turn.parts or []:
                         if part.inline_data and part.inline_data.data:

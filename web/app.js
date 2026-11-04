@@ -390,6 +390,7 @@ async function startListening(auto = false) {
       const { text } = await (await api("/api/transcribe", { method: "POST", body: fd })).json();
       if (!text) { core.set("idle", "Didn't catch that"); setTimeout(() => state.coreMode === "idle" && core.set("idle"), 1800); return; }
       state.lastInputWasVoice = true;
+      if (isEndPhrase(text)) { stopSpeaking(); state.lastInputWasVoice = false; core.set("idle"); return; }
       send(text);
     } catch (e) { core.set("idle"); toast("Transcription failed: " + e.message, "bad"); }
   };
@@ -521,6 +522,7 @@ function onLiveEvent(ev) {
     case "user_text": liveBubble("user", ev.text); break;
     case "jarvis_text": liveBubble("jarvis", ev.text); break;
     case "interrupted": liveFlush(); break;
+    case "end_call": liveFlush(); stopLive(true); toast("Call ended."); break;
     case "turn_complete":
       live.userEl = live.jarvisEl = null; live.dropAudio = false;
       $("#liveText").textContent = `Live call · ${live.model}`;
@@ -680,6 +682,7 @@ const input = $("#input");
 el$("#composer").addEventListener("submit", (e) => {
   e.preventDefault(); state.lastInputWasVoice = false; const t = input.value.trim(); input.value = ""; autoGrow();
   if (!t) return;
+  if (isEndPhrase(t)) { stopSpeaking(); if (live.active) stopLive(); toast("Very good."); return; }
   if (live.active && live.ws?.readyState === 1) { liveBubble("user", t); live.ws.send(JSON.stringify({ type: "text", text: t })); return; }
   send(t);
 });
@@ -1005,7 +1008,7 @@ function checkReminders() {
 setInterval(checkReminders, 30000);
 
 /* ───────────────────────── settings ───────────────────────── */
-const SETTING_FIELDS = ["wake_word", "wake_sensitivity", "pc_control", "model_strict", "daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
+const SETTING_FIELDS = ["end_phrases", "wake_word", "wake_sensitivity", "pc_control", "model_strict", "daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
 
 async function openSettings() {
   $("#settings").classList.remove("hidden");
@@ -1031,6 +1034,7 @@ async function openSettings() {
   $$("[data-mem]").forEach((b) => b.onclick = async () => { await api(`/api/memories/${b.dataset.mem}`, { method: "DELETE" }); b.parentElement.remove(); });
   loadGoogleStatus();
   loadWakeStatus();
+  loadRoutines().catch(() => {});
 }
 window.openSettings = guard(openSettings);
 
@@ -1305,6 +1309,35 @@ async function loadWakeStatus() {
     if (state.coreMode === "idle" && !live.active) core.set("idle");
     if (w.enabled && ["installing", "loading", "off"].includes(w.status)) setTimeout(loadWakeStatus, 3000);
   } catch {}
+}
+
+/* ───────────────────────── routines & end phrases ───────────────────────── */
+async function loadRoutines() {
+  const list = $("#routineList"); if (!list) return;
+  const { routines, help } = await getJSON("/api/routines");
+  $("#rHelp").textContent = "Step forms: " + help.join(" · ");
+  list.innerHTML = routines.map((r) => `<li data-name="${esc(r.name)}"><div class="r-top"><span class="r-name">${esc(r.name)}</span>
+      <span class="row" style="gap:6px"><button class="mini" data-r-run>Run</button><button class="mini" data-r-del>Delete</button></span></div>
+      <div class="r-trig">${r.triggers.map((t) => "“" + esc(t) + "”").join("  ")}</div>
+      <ol>${r.actions.map((a) => `<li>${esc(a)}</li>`).join("")}</ol></li>`).join("") || '<li class="muted">No routines yet.</li>';
+  $$("#routineList li[data-name]").forEach((li) => {
+    $("[data-r-run]", li).onclick = guard(async () => { const r = await postJSON(`/api/routines/${encodeURIComponent(li.dataset.name)}/run`); toast(r.problems?.length ? "Problems: " + r.problems.join("; ") : `${li.dataset.name} done.`, r.problems?.length ? "warn" : ""); });
+    $("[data-r-del]", li).onclick = guard(async () => { if (!confirm(`Delete routine “${li.dataset.name}”?`)) return; await api(`/api/routines/${encodeURIComponent(li.dataset.name)}`, { method: "DELETE" }); loadRoutines(); });
+  });
+}
+el$("#rSave").addEventListener("click", guard(async () => {
+  await postJSON("/api/routines", { name: $("#rName").value.trim(), triggers: $("#rTriggers").value.split(",").map((t) => t.trim()).filter(Boolean),
+    actions: $("#rActions").value.split("\n").map((a) => a.trim()).filter(Boolean) });
+  toast("Routine saved."); $("#rName").value = $("#rTriggers").value = $("#rActions").value = ""; loadRoutines();
+}));
+
+/* "shut up" & co: stop talking / hang up immediately, without asking Gemini */
+function normEnd(t) { return t.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, " ").replace(/\s+/g, " ").trim(); }
+function isEndPhrase(text) {
+  const t = normEnd(text); if (!t) return false;
+  const words = t.split(" ").length;
+  const phrases = (state.settings.end_phrases || "shut up, goodbye jarvis").split(",").map(normEnd).filter(Boolean);
+  return phrases.some((p) => (t === p || t.endsWith(" " + p) || t.startsWith(p + " ")) && words <= p.split(" ").length + 3);
 }
 
 async function boot() {

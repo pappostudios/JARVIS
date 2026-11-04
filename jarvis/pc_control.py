@@ -337,3 +337,184 @@ def media_control(action: str, volume_percent: Optional[int] = None) -> dict:
     else:
         ok = _run(["playerctl", {"play_pause": "play-pause", "next": "next", "previous": "previous", "stop": "stop"}[a]])
     return {"done": a} if ok else {"error": "Install playerctl / pactl for media control on Linux."}
+
+
+# ── windows ───────────────────────────────────────────────────
+# Window control uses the Windows API directly (ctypes, no extra packages). JARVIS's own window is never touched.
+APP_ALIASES = {"word": "winword", "excel": "excel", "powerpoint": "powerpnt", "outlook": "outlook", "edge": "msedge",
+               "chrome": "chrome", "file explorer": "explorer", "explorer": "explorer", "folders": "explorer",
+               "vs code": "code", "vscode": "code", "visual studio code": "code", "teams": "ms-teams",
+               "whatsapp": "whatsapp", "spotify": "spotify", "notepad": "notepad", "discord": "discord",
+               "firefox": "firefox", "zoom": "zoom", "telegram": "telegram"}
+_SKIP_TITLES = {"program manager", "windows input experience", "microsoft text input application", "settings"}
+ALL_WORDS = {"all", "everything", "all windows", "every window", "all apps", "all tabs", "everything open"}
+
+
+def _is_jarvis(w: dict) -> bool:
+    return "j.a.r.v.i.s" in w["title"].lower()
+
+
+def _windows_raw() -> list[dict]:
+    """Visible top-level app windows: [{hwnd, title, app, minimized}]."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    dwm = ctypes.windll.dwmapi
+    out: list[dict] = []
+
+    def proc_name(pid: int) -> str:
+        h = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(520)
+            size = wintypes.DWORD(520)
+            if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                return Path(buf.value).stem
+            return ""
+        finally:
+            kernel32.CloseHandle(h)
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd) or user32.GetWindow(hwnd, 4):        # GW_OWNER: skip dialogs
+            return True
+        if user32.GetWindowLongW(hwnd, -20) & 0x80:                                # WS_EX_TOOLWINDOW
+            return True
+        cloaked = wintypes.DWORD(0)
+        dwm.DwmGetWindowAttribute(hwnd, 14, ctypes.byref(cloaked), ctypes.sizeof(cloaked))  # hidden UWP shells
+        if cloaked.value:
+            return True
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n == 0:
+            return True
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.GetWindowTextW(hwnd, buf, n + 1)
+        if buf.value.strip().lower() in _SKIP_TITLES:
+            return True
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        out.append({"hwnd": hwnd, "title": buf.value, "app": proc_name(pid.value),
+                    "minimized": bool(user32.IsIconic(hwnd))})
+        return True
+
+    user32.EnumWindows(cb, 0)
+    return out
+
+
+def _need_windows() -> None:
+    if SYSTEM != "Windows":
+        raise RuntimeError("Window control currently works on Windows only.")
+
+
+def _match_windows(target: str, include_jarvis: bool = False) -> list[dict]:
+    wins = [w for w in _windows_raw() if include_jarvis or not _is_jarvis(w)]
+    target = re.sub(r"^(the|my|a|an|this|that)\s+", "", target.strip(), flags=re.I)
+    target = re.sub(r"\s+(window|windows|app|tab|tabs)$", "", target, flags=re.I) or target
+    q = _norm(target)
+    if q in ALL_WORDS:
+        return wins
+    app = APP_ALIASES.get(q, q)
+    scored = []
+    for w in wins:
+        s = max(_score(app, w["app"]) + 10 if _score(app, w["app"]) else 0, _score(target, w["title"]))
+        if s:
+            scored.append((s, w))
+    if not scored:
+        return []
+    best = max(s for s, _ in scored)
+    return [w for s, w in scored if s >= best - 15]
+
+
+def _show(hwnd: int, cmd: int) -> None:
+    import ctypes
+
+    ctypes.windll.user32.ShowWindow(hwnd, cmd)
+
+
+def list_windows() -> list[dict]:
+    """List the windows open on the user's PC (title, app, minimized). Use before closing/switching when unsure."""
+    _allowed()
+    _need_windows()
+    return [{"title": w["title"][:120], "app": w["app"], "minimized": w["minimized"]}
+            for w in _windows_raw() if not _is_jarvis(w)]
+
+
+def minimize_windows(target: str = "all") -> dict:
+    """Minimize windows on the PC: "all" (everything except JARVIS — like showing the desktop) or an app / window
+    title such as "chrome", "spotify", "word", "invoice.pdf".
+
+    Args:
+        target: "all", or the app name / part of the window title.
+    """
+    _allowed()
+    _need_windows()
+    wins = _match_windows(target)
+    if not wins:
+        return {"error": f"No open window matches '{target}'."}
+    for w in wins:
+        _show(w["hwnd"], 6)  # SW_MINIMIZE
+    return {"minimized": len(wins), "windows": [w["title"][:60] for w in wins[:10]]}
+
+
+def close_windows(target: str) -> dict:
+    """Close windows on the PC by app name or window title (e.g. "chrome", "spotify", "the invoice pdf"), or "all".
+    Apps still get the chance to ask about unsaved work. JARVIS's own window is never closed.
+
+    Args:
+        target: The app name / part of the window title, or "all".
+    """
+    import ctypes
+
+    _allowed()
+    _need_windows()
+    wins = [w for w in _match_windows(target) if w["app"].lower() != "explorer" or _norm(target) not in ALL_WORDS]
+    if not wins:
+        return {"error": f"No open window matches '{target}'."}
+    for w in wins:
+        ctypes.windll.user32.PostMessageW(w["hwnd"], 0x0010, 0, 0)  # WM_CLOSE — polite close
+    return {"closed": len(wins), "windows": [w["title"][:60] for w in wins[:10]]}
+
+
+def maximize_window(target: str) -> dict:
+    """Maximize (full-screen) a window and bring it to the front.
+
+    Args:
+        target: App name or part of the window title.
+    """
+    _allowed()
+    _need_windows()
+    wins = _match_windows(target)
+    if not wins:
+        return {"error": f"No open window matches '{target}'."}
+    _show(wins[0]["hwnd"], 3)  # SW_MAXIMIZE
+    _focus(wins[0]["hwnd"])
+    return {"maximized": wins[0]["title"][:80]}
+
+
+def _focus(hwnd: int) -> None:
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.keybd_event(0x12, 0, 0, 0)  # tap Alt: Windows only lets the active app change focus otherwise
+    user32.keybd_event(0x12, 0, 2, 0)
+    user32.SetForegroundWindow(hwnd)
+
+
+def focus_window(target: str) -> dict:
+    """Switch to / bring to the front / restore a window (e.g. "switch to Spotify", "show me Word").
+
+    Args:
+        target: App name or part of the window title.
+    """
+    _allowed()
+    _need_windows()
+    wins = _match_windows(target)
+    if not wins:
+        return {"error": f"No open window matches '{target}'. Use open_app to start it."}
+    _focus(wins[0]["hwnd"])
+    return {"focused": wins[0]["title"][:80]}

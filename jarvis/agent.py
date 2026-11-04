@@ -65,6 +65,10 @@ How you work:
 - The internet: for anything current or factual you're not certain of — news, prices, weather, sports, opening
   hours, products, people, companies — call web_search, then answer briefly and say where it came from ("according
   to BBC News…"). Use read_webpage on a result when you need more detail. Don't guess facts that may have changed.
+- Windows on the PC: list_windows, minimize_windows ("all" = show the desktop), close_windows, maximize_window,
+  focus_window. Never close or minimise the JARVIS window. If several windows match, say which ones you acted on.
+- Routines: when the user describes a routine ("when I say home, minimise everything and open Spotify"), create it
+  with create_routine using the simple step forms. In calls, when they say a routine's trigger, call run_routine.
 - The user's computer: you can open apps and websites, find and open files and folders, and control media and
   volume on the PC where you run (also when the user talks to you from the phone — say it opened "on your PC").
   Use find_files when unsure which file is meant and ask if several match.
@@ -99,6 +103,14 @@ def _system_prompt() -> str:
                 f"{a['label'] or 'unlabelled'} = {a['email']}{' (default)' if a['default'] else ''}" for a in accs)
                 + ". Reading tools cover all accounts unless you pass account=. Send/create from the account that "
                   "fits the context (work matters from work); replies automatically use the receiving account.")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from . import routines
+
+        desc = routines.describe()
+        if desc:
+            parts.append(desc)
     except Exception:  # noqa: BLE001
         pass
     mems = projects.list_memories()
@@ -378,6 +390,26 @@ class Jarvis:
     # ── main entry ──
     def chat(self, user_text: str) -> Iterator[dict[str, Any]]:
         """Yields events: {"type": "status", "text"} … then {"type": "reply", "text", "tools"} or {"type": "error"}."""
+        from . import routines
+
+        quick = None
+        if routines.is_end_phrase(user_text):
+            quick = ("Very good.", [])
+        else:
+            r = routines.match(user_text)
+            if r:
+                yield {"type": "status", "text": f"Running {r['name']}"}
+                result = routines.run(r)
+                quick = (routines.summary(result), ["routine:" + r["name"]])
+        if quick:  # handled on the PC directly — no Gemini request
+            with self._lock:
+                db.log_message("user", user_text)
+                db.log_message("jarvis", quick[0])
+                self.history.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
+                self.history.append(types.Content(role="model", parts=[types.Part(text=quick[0])]))
+            yield {"type": "reply", "text": quick[0], "tools": quick[1], "model": "routine" if quick[1] else None,
+                   "seconds": 0, "note": None, "silent": not quick[1]}
+            return
         with self._lock:
             tools.turns.value += 1
             db.log_message("user", user_text)

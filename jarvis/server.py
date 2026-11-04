@@ -398,6 +398,46 @@ def save_settings(values: dict[str, Any]):
     return out
 
 
+class RoutineBody(BaseModel):
+    name: str
+    triggers: list[str]
+    actions: list[str]
+
+
+@app.get("/api/routines")
+def get_routines():
+    from . import routines
+
+    return {"routines": routines.all_routines(), "help": routines.ACTION_HELP}
+
+
+@app.post("/api/routines")
+def save_routine(body: RoutineBody):
+    from . import routines
+
+    try:
+        return routines.create_routine(body.name, body.triggers, body.actions)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/api/routines/{name}")
+def remove_routine(name: str):
+    from . import routines
+
+    return routines.delete_routine(name)
+
+
+@app.post("/api/routines/{name}/run")
+def run_routine_now(name: str):
+    from . import routines
+
+    r = routines.find(name)
+    if not r:
+        raise HTTPException(404, "No such routine")
+    return routines.run(r)
+
+
 @app.get("/api/events")
 async def server_events():
     from . import events
