@@ -20,7 +20,7 @@ db.execute("""CREATE TABLE IF NOT EXISTS usage (
     PRIMARY KEY (day, model, kind))""")
 
 KIND_LABELS = {"chat": "Chat (typed & voice messages)", "transcribe": "Voice → text",
-               "voice": "Gemini voice (speech)", "live": "Live calls", "test": "Diagnostics test"}
+               "voice": "Gemini voice (speech)", "search": "Web search (Google)", "live": "Live calls", "test": "Diagnostics test"}
 
 # Paid-tier prices per 1M tokens (input, output, cached input) from Google's Gemini 3.8 Flash price page.
 # Used only to ESTIMATE what your real usage would cost if you upgraded. Edit if prices change.

@@ -7,7 +7,7 @@ import traceback
 from datetime import date, datetime
 from typing import Any, Callable, Optional
 
-from . import config, db, google_services as g, pc_control as pc, projects as p
+from . import config, db, google_services as g, pc_control as pc, projects as p, web
 
 
 # ── time tool ─────────────────────────────────────────────────
@@ -129,6 +129,8 @@ TOOL_FUNCS: list[Callable[..., Any]] = [
     # projects & tasks
     p.list_projects, p.get_project, p.create_project, p.update_project, p.delete_project, p.log_progress,
     p.add_task, p.list_tasks, p.prioritized_tasks, p.update_task, p.complete_task, p.delete_task,
+    # the internet
+    web.web_search, web.read_webpage,
     # this computer
     pc.open_app, pc.open_website, pc.find_files, pc.open_file, pc.open_folder, pc.media_control,
     # memory
@@ -145,6 +147,7 @@ STATUS_LABELS = {
     "list_emails": "Scanning inbox", "read_email": "Reading email", "send_email": "Composing email",
     "reply_to_email": "Composing reply", "create_draft": "Drafting email", "mark_emails_read": "Tidying inbox",
     "archive_emails": "Archiving", "remember": "Committing to memory",
+    "web_search": "Searching the web", "read_webpage": "Reading web page",
     "open_app": "Opening app", "open_website": "Opening website", "find_files": "Searching files",
     "open_file": "Opening file", "open_folder": "Opening folder", "media_control": "Adjusting media",
     "list_projects": "Reviewing projects", "get_project": "Reviewing project", "create_project": "Creating project",

@@ -10,3 +10,5 @@ google-auth-httplib2>=0.2
 tzdata>=2024.1
 # Optional: very natural British male voice (en-GB-RyanNeural). Remove if you only want Gemini voices.
 edge-tts>=6.1
+# Web search fallback (DuckDuckGo) when Google Search grounding isn't available on your tier
+ddgs>=9

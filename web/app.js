@@ -219,7 +219,7 @@ const core = (() => {
   return {
     set(mode, label) {
       state.coreMode = mode;
-      $("#coreStatus").textContent = label || { idle: "Standing by", listening: "Listening", thinking: "Processing", speaking: "Speaking" }[mode];
+      $("#coreStatus").textContent = label || { idle: state.wakeListening ? "Say “Hey JARVIS”" : "Standing by", listening: "Listening", thinking: "Processing", speaking: "Speaking" }[mode];
     },
   };
 })();
@@ -1005,7 +1005,7 @@ function checkReminders() {
 setInterval(checkReminders, 30000);
 
 /* ───────────────────────── settings ───────────────────────── */
-const SETTING_FIELDS = ["pc_control", "model_strict", "daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
+const SETTING_FIELDS = ["wake_word", "wake_sensitivity", "pc_control", "model_strict", "daily_request_limit", "live_interrupt", "model", "thinking", "user_name", "address_as", "about_me", "work_start", "work_end", "voice_engine", "gemini_voice", "edge_voice", "auto_speak", "require_confirmation"];
 
 async function openSettings() {
   $("#settings").classList.remove("hidden");
@@ -1030,6 +1030,7 @@ async function openSettings() {
   $("#memories").innerHTML = data.memories.map((m) => `<li><span>${esc(m.fact)}</span><button data-mem="${m.id}" aria-label="Forget">✕</button></li>`).join("") || '<li class="muted">Nothing yet — say “Jarvis, remember that…”.</li>';
   $$("[data-mem]").forEach((b) => b.onclick = async () => { await api(`/api/memories/${b.dataset.mem}`, { method: "DELETE" }); b.parentElement.remove(); });
   loadGoogleStatus();
+  loadWakeStatus();
 }
 window.openSettings = guard(openSettings);
 
@@ -1047,6 +1048,7 @@ function collectSettings() {
 }
 
 el$("#saveSettings").addEventListener("click", guard(async () => {
+  setTimeout(loadWakeStatus, 800);
   state.settings = await postJSON("/api/settings", collectSettings());
   $("#settings").classList.add("hidden");
   toast("Settings saved.");
@@ -1264,6 +1266,47 @@ $$("#tabbar button").forEach((b) => b.addEventListener("click", () => setTab(b.d
 setTab("assistant");
 
 /* ───────────────────────── boot ───────────────────────── */
+/* ───────────────────────── wake word ─────────────────────────
+   The PC listens for "Hey JARVIS" (jarvis/wakeword.py) and pushes a "wake" event; the JARVIS window on that PC
+   answers by opening a Live call. Phones/other devices ignore it. */
+let serverEvents = null;
+function chime() {
+  try {
+    const ctx = ensureAudio(), t = ctx.currentTime;
+    [660, 990].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = f; o.type = "sine";
+      g.gain.setValueAtTime(0, t + i * 0.12); g.gain.linearRampToValueAtTime(0.18, t + i * 0.12 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.25);
+      o.connect(g); g.connect(ctx.destination); o.start(t + i * 0.12); o.stop(t + i * 0.12 + 0.3);
+    });
+  } catch {}
+}
+function connectEvents() {
+  if (serverEvents) return;
+  serverEvents = new EventSource("/api/events");
+  serverEvents.onmessage = (e) => {
+    let ev; try { ev = JSON.parse(e.data); } catch { return; }
+    if (ev.type === "wake" && isDesktop && !live.active) {
+      chime(); setTab("assistant"); toast("“Hey JARVIS” — opening a call…");
+      startLive();
+    }
+  };
+}
+async function loadWakeStatus() {
+  try {
+    const w = await getJSON("/api/wakeword");
+    state.wakeListening = w.enabled && w.status === "listening";
+    const el = $("#wakeStatus");
+    if (el) el.textContent = !w.enabled ? "Off." : {
+      installing: "Installing the wake-word engine (one time, a few minutes)…", loading: "Preparing the “hey jarvis” model…",
+      listening: `Listening for “Hey JARVIS”${w.last_wake ? ` · last heard ${w.last_wake}` : ""}.`, paused: "Paused during a call.",
+      error: "Problem: " + w.message, off: "Starting…" }[w.status] || w.message;
+    if (state.coreMode === "idle" && !live.active) core.set("idle");
+    if (w.enabled && ["installing", "loading", "off"].includes(w.status)) setTimeout(loadWakeStatus, 3000);
+  } catch {}
+}
+
 async function boot() {
   let s;
   try { s = await (await fetch("/api/session", { cache: "no-store" })).json(); }
@@ -1282,6 +1325,7 @@ async function boot() {
   }
   await refresh();
   setTimeout(silentUpdateCheck, 5000);
+  connectEvents(); loadWakeStatus();
   if (!state.pollStarted) { state.pollStarted = true; setInterval(() => document.visibilityState === "visible" && !state.offline && refresh(), 60000); }
 }
 document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && refresh());

@@ -217,6 +217,16 @@ class _Call:
 
 
 async def handle(ws: WebSocket) -> None:
+    from . import wakeword
+
+    wakeword.call_started()
+    try:
+        await _handle(ws)
+    finally:
+        wakeword.call_ended()
+
+
+async def _handle(ws: WebSocket) -> None:
     call = _Call(ws)
     try:
         agent.jarvis._ensure_client()

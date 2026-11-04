@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
@@ -219,6 +219,18 @@
           <p class="muted" style="margin:0;font-size:12px">When reached, JARVIS pauses text &amp; voice messages until midnight and speaks with the free Microsoft voice. Live calls aren't counted. See today's count under System → Usage &amp; free tier.</p>
         </section>
         <section>
+          <h3>Wake word</h3>
+          <label class="switch"><input type="checkbox" id="s_wake_word"><span>Listen on this PC for “Hey JARVIS” and open a call (runs offline on your computer)</span></label>
+          <label>Sensitivity
+            <select id="s_wake_sensitivity">
+              <option value="low">Low — fewer accidental wake-ups</option>
+              <option value="normal">Normal</option>
+              <option value="high">High — wakes more easily</option>
+            </select>
+          </label>
+          <p class="muted" id="wakeStatus" style="margin:0;font-size:12.5px"></p>
+        </section>
+        <section>
           <h3>PC control</h3>
           <label class="switch"><input type="checkbox" id="s_pc_control"><span>Let JARVIS open apps, websites, files and folders, and control media &amp; volume on this computer</span></label>
         </section>
@@ -264,6 +276,6 @@
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

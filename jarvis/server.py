@@ -20,6 +20,16 @@ from .tools import execute_pending
 logsetup.setup()
 app = FastAPI(title="J.A.R.V.I.S.", docs_url=None, redoc_url=None)
 
+
+@app.on_event("startup")
+async def _startup() -> None:
+    import asyncio
+
+    from . import events, wakeword
+
+    events.bind_loop(asyncio.get_running_loop())
+    wakeword.apply()  # resume "Hey JARVIS" listening if it was switched on
+
 # ── auth ──────────────────────────────────────────────────────
 _SECRET_FILE = config.DATA_DIR / "secret.key"
 if not _SECRET_FILE.exists():
@@ -378,9 +388,29 @@ def get_settings():
 
 @app.post("/api/settings")
 def save_settings(values: dict[str, Any]):
+    from . import wakeword
+
     if values.get("model") and values.get("model") != db.get_setting("model"):
         jarvis._cooldown.clear()  # a newly chosen model gets a fresh chance
-    return db.set_settings(values)
+    out = db.set_settings(values)
+    if "wake_word" in values:
+        wakeword.apply()
+    return out
+
+
+@app.get("/api/events")
+async def server_events():
+    from . import events
+
+    return StreamingResponse(events.stream(), media_type="text/event-stream",
+                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"})
+
+
+@app.get("/api/wakeword")
+def wakeword_status():
+    from . import wakeword
+
+    return wakeword.status()
 
 
 @app.delete("/api/memories/{memory_id}")

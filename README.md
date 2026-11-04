@@ -23,6 +23,7 @@ projects and to-do list, and helps you plan your day. You can talk to him or typ
 | **Projects** | “New project: website relaunch, due 1 December, high priority” · “Add a task to write the homepage copy, 2 hours” · “I finished the wireframes” · “How are my projects going?” |
 | **Planning** | “Plan my day” — he combines free calendar slots, deadlines, priorities and estimates, proposes a timed plan and puts focus blocks in your calendar once you agree. |
 | **PC control** | “Open Spotify”, “open my invoices folder”, “pause the music”, “volume to 30%”. |
+| **Web & wake word** | “Hey JARVIS” opens a call · “What's the latest on…?”, “weather tomorrow?” (Google Search, with sources). |
 | **Memory** | “Remember that I prefer meetings after 10am” · “Remember Pepper is my business partner” — remembered in every conversation. |
 | **Proactive** | Spoken reminder 10 minutes before each meeting, overdue-task awareness, morning briefing button. |
 
@@ -165,6 +166,26 @@ If a voice engine fails, JARVIS automatically falls back to the device voice.
 hands-free back-and-forth.
 
 ---
+
+## "Hey JARVIS" wake word
+
+**Settings → Wake word → Listen on this PC for "Hey JARVIS"**. Say **"Hey JARVIS"** (or "Hi JARVIS") and he chimes and
+opens a Live call in the JARVIS window. The first time you switch it on, JARVIS installs the wake-word engine
+(openWakeWord, ~100 MB, a few minutes) — the setting shows its progress.
+
+- **Private:** listening happens entirely on your PC with a small local model; no audio is sent anywhere until the
+  call opens. It pauses during calls.
+- **Sensitivity:** *Low* if he wakes up by accident, *High* if he doesn't hear you.
+- **The JARVIS window must be open** (it can be in the background); the PC needs a microphone.
+- **Phones:** Android doesn't let a web page listen in the background — on the phone, tap the green call button.
+
+## Web search
+
+Ask anything current — *"what's the weather in Tel Aviv tomorrow?"*, *"latest news about OpenAI"*, *"when does
+Shufersal close tonight?"*, *"Arsenal result last night"*. JARVIS searches with **Google Search via Gemini** (answers
+with sources). Where that isn't available — Google doesn't include it on the free tier for some models — he
+automatically uses **DuckDuckGo** instead. He can also open a result and read the page for details. Each search uses
+1 Gemini request (it shows as *Web search* on the Usage page).
 
 ## PC control (apps, files, media)
 
